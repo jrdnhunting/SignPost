@@ -33,13 +33,32 @@ enum MemberRole {
 
 /// High-level lifecycle state of a WorkOrder.
 enum WorkOrderStatus {
-  DRAFT        // created but not yet submitted by the client
-  SUBMITTED    // client has submitted; awaiting dispatcher review
-  SCHEDULED    // dispatcher has set a scheduledDate and assigned technicians
-  IN_PROGRESS  // at least one technician has clocked in
-  COMPLETED    // all work confirmed done
-  ON_HOLD      // paused pending materials, access, weather, etc.
-  CANCELLED    // voided before completion
+  PENDING              // client submitted; awaiting admin confirmation
+  CONFIRMED            // admin confirmed; utility marking next
+  PENDING_INSTALLATION // utility marking done; installation ready
+  INSTALLED            // installation completed
+  PENDING_REMOVAL      // removal scheduled / requested
+  COMPLETED            // sign removed; order fully done
+  ON_HOLD              // paused pending materials, access, weather, etc.
+  CANCELLED            // voided before completion
+}
+
+/// Type of task within a work order workflow.
+enum TaskType {
+  CONFIRM_ORDER      // admin reviews and confirms new client order
+  UTILITY_MARKING    // utility marking must happen before installation
+  INSTALLATION       // sign installation
+  REMOVAL            // sign removal
+  REMOVAL_REQUEST    // client/public requested removal (notification task)
+  SERVICE            // ad-hoc service or maintenance
+}
+
+/// Lifecycle state of a single Task.
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
 }
 
 enum WorkOrderPriority {
@@ -102,15 +121,32 @@ model Organization {
   slug      String   @unique
   logoUrl   String?
   /// Subscription plan identifier — enforced at app layer, not DB.
-  plan      String   @default("starter")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  plan           String   @default("starter")
+  /// Monotonically-increasing counter used to assign orderId on WorkOrders.
+  /// Incremented atomically inside a transaction when each WO is created.
+  nextOrderSeq   Int      @default(0)
+  // Company profile fields
+  phone               String?
+  contactEmail        String?
+  addressLine1        String?
+  addressLine2        String?
+  city                String?
+  state               String?
+  postalCode          String?
+  country             String?
+  outOfServiceAreaMessage String?
+  // Anonymous removal form configuration
+  removalFormText     String?
+  removalFormUrl      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   memberships        Membership[]
   clients            Client[]
   workOrders         WorkOrder[]
   inventoryItemTypes InventoryItemType[]
   invoices           Invoice[]
+  serviceAreas       ServiceArea[]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -135,6 +171,10 @@ model User {
   photos      Photo[]
   /// Work orders this staff member entered on behalf of a client.
   workOrders  WorkOrder[] @relation("CreatedByStaff")
+  /// Work orders where this user is the designated owner/dispatcher.
+  ownedWorkOrders WorkOrder[] @relation("OwnedByUser")
+  serviceAreaAssignments ServiceAreaTechnician[]
+  assignedTasks Task[]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -154,8 +194,8 @@ model Membership {
   organization Organization @relation(fields: [organizationId], references: [id])
   user         User         @relation(fields: [userId], references: [id])
 
-  /// One role per user per organization.
-  @@unique([organizationId, userId])
+  /// One role per user per organization (a user can hold multiple roles via separate rows).
+  @@unique([organizationId, userId, role])
   @@index([organizationId])
   @@index([userId])
   /// Quickly fetch all technicians (or admins) for an org.
@@ -166,27 +206,51 @@ model Membership {
 // CLIENT  —  customer account
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// A client company or individual that orders sign work from an Organization.
-/// One Organization can serve many Clients.
+/// A client individual (e.g. real estate agent) who orders sign work from an Organization.
 model Client {
-  id             String   @id @default(cuid())
-  organizationId String
-  companyName    String
-  /// Primary human contact name (optional — some clients are sole proprietors).
-  contactName    String?
-  email          String?
-  phone          String?
-  notes          String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id              String   @id @default(cuid())
+  organizationId  String
+  firstName       String
+  lastName        String
+  /// Brokerage or company name — optional for sole proprietors.
+  companyName     String?
+  email           String
+  phone           String
+  profilePhotoUrl    String?
+  notes              String?
+  /// Notes visible to all users including the client portal.
+  clientNotesPublic  String?
+  /// Notes visible to staff and technicians only — never shown to client portal users.
+  clientNotesPrivate String?
+  createdAt          DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  clientUsers  ClientUser[]
-  workOrders   WorkOrder[]
-  invoices     Invoice[]
+  organization    Organization          @relation(fields: [organizationId], references: [id])
+  clientUsers     ClientUser[]
+  workOrders      WorkOrder[]
+  invoices        Invoice[]
+  paymentMethods  ClientPaymentMethod[]
 
   @@index([organizationId])
-  @@index([organizationId, companyName])
+  @@index([organizationId, lastName, firstName])
+}
+
+/// A saved payment method on file for a Client.
+model ClientPaymentMethod {
+  id        String   @id @default(cuid())
+  clientId  String
+  /// e.g. "credit_card", "bank_transfer", "check", "cash"
+  type      String
+  /// Human-readable label, e.g. "Chase Visa ••••4242"
+  label     String
+  isDefault Boolean  @default(false)
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -248,12 +312,20 @@ model WorkOrder {
   locationNotes String?
 
   // ── Work order details ────────────────────────────────────────────────────
-  title         String?
-  description   String?
-  status        WorkOrderStatus   @default(DRAFT)
-  priority      WorkOrderPriority @default(NORMAL)
-  scheduledDate DateTime?
-  completedAt   DateTime?
+  /// Per-org sequential identifier, zero-padded to 6 digits for display (e.g. 000042).
+  /// Assigned atomically at creation; never reused; never user-editable.
+  orderId            Int
+  /// Staff User who owns / dispatches this order. Auto-assigned to org admin on creation.
+  ownerId            String?
+  /// Notes visible to client, technician, and staff. Replaces the old description field.
+  orderNotes         String?
+  /// Target date the client wants the sign installation live.
+  listingGoLiveDate  DateTime?
+  status             WorkOrderStatus   @default(PENDING)
+  priority              WorkOrderPriority @default(NORMAL)
+  scheduledDate         DateTime?
+  scheduledRemovalDate  DateTime?
+  completedAt           DateTime?
   cancelledAt   DateTime?
   /// Internal-only notes from dispatcher (not visible on client portal).
   internalNotes String?
@@ -261,20 +333,28 @@ model WorkOrder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // ── Service Area ─────────────────────────────────────────────────────────
+  serviceAreaId   String?
+  serviceAreaFee  Decimal?  @db.Decimal(10, 2)
+
   organization          Organization           @relation(fields: [organizationId], references: [id])
   client                Client                 @relation(fields: [clientId], references: [id])
   submittedBy           ClientUser?            @relation("SubmittedByClientUser", fields: [submittedById], references: [id])
   createdBy             User?                  @relation("CreatedByStaff", fields: [createdById], references: [id])
+  owner                 User?                  @relation("OwnedByUser", fields: [ownerId], references: [id])
+  serviceArea           ServiceArea?           @relation(fields: [serviceAreaId], references: [id])
   items                 WorkOrderItem[]
   assignments           Assignment[]
   workLogs              WorkLog[]
   photos                Photo[]
   inventoryTransactions InventoryTransaction[]
   invoices              Invoice[]
+  tasks                 Task[]
 
   // ── Indexes ──────────────────────────────────────────────────────────────
   // These indexes support filtering and sorting within a tenant.
   // None of them imply address uniqueness.
+  @@unique([organizationId, orderId])
   @@index([organizationId])
   @@index([clientId])
   @@index([organizationId, status])
@@ -283,6 +363,7 @@ model WorkOrder {
   @@index([organizationId, createdAt])
   @@index([submittedById])
   @@index([createdById])
+  @@index([ownerId])
   /// Geo-filtered list views (e.g. "all jobs in 90210") — non-unique.
   @@index([organizationId, postalCode])
   @@index([organizationId, city, state])
@@ -545,4 +626,85 @@ model Payment {
   @@index([invoiceId])
   @@index([paidAt])
   @@index([invoiceId, paidAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SERVICE AREA  —  geographic zone with optional pricing adjustment
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A named polygon zone drawn on a map by the org admin.
+/// Used to auto-assign serviceAreaId / serviceAreaFee on work orders.
+model ServiceArea {
+  id                String    @id @default(cuid())
+  organizationId    String
+  name              String
+  /// GeoJSON Polygon geometry stored as JSON.
+  polygon           Json
+  pricingAdjustment Decimal?  @db.Decimal(10, 2)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  technicians  ServiceAreaTechnician[]
+  workOrders   WorkOrder[]
+
+  @@index([organizationId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SERVICE AREA TECHNICIAN  —  technician assignment to a zone
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Maps technicians to service areas they cover.
+model ServiceAreaTechnician {
+  id            String   @id @default(cuid())
+  serviceAreaId String
+  userId        String
+  createdAt     DateTime @default(now())
+
+  serviceArea ServiceArea @relation(fields: [serviceAreaId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceAreaId, userId])
+  @@index([serviceAreaId])
+  @@index([userId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// TASK  —  actionable to-do item within a work order
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// An actionable step within a WorkOrder's lifecycle.
+/// taskNumber is sequential per work order (1-based); displayed as ORDERID-TASKNUM.
+model Task {
+  id          String     @id @default(cuid())
+  workOrderId String
+  taskType    TaskType
+  /// 1-based sequential number within the work order (e.g. 1, 2, 3…).
+  taskNumber  Int
+  status      TaskStatus @default(PENDING)
+  /// Staff User assigned to complete this task.
+  assignedToId String?
+  // ── For REMOVAL_REQUEST tasks submitted by anonymous/portal users ─────────
+  requesterName  String?
+  requesterPhone String?
+  requesterEmail String?
+  // ── Scheduling ────────────────────────────────────────────────────────────
+  /// Preferred date provided by the requestor (removal requests).
+  preferredDate  DateTime?
+  /// Proposed/confirmed scheduled date (set when CONFIRM_ORDER is completed).
+  scheduledDate  DateTime?
+  notes          String?
+  completedAt    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  workOrder  WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  assignedTo User?     @relation(fields: [assignedToId], references: [id])
+
+  @@unique([workOrderId, taskNumber])
+  @@index([workOrderId])
+  @@index([assignedToId])
+  @@index([assignedToId, status])
+  @@index([workOrderId, status])
 }
