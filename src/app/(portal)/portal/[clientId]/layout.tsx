@@ -27,6 +27,7 @@ export default async function PortalLayout({
       <PortalNav
         clientName={client.companyName ?? `${client.firstName} ${client.lastName}`}
         userName={session.user.name ?? ""}
+        clientId={clientId}
       />
       <main className="max-w-4xl mx-auto px-4 py-8">{children}</main>
     </div>

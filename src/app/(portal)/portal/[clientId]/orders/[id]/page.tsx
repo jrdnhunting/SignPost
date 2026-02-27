@@ -7,6 +7,7 @@ import { formatDate, formatOrderId } from "@/lib/utils"
 import { WO_STATUS_LABELS, WO_STATUS_COLORS } from "@/lib/constants"
 import OrderStatusTimeline from "@/components/portal/order-status-timeline"
 import { RemovalRequestDialog } from "@/components/portal/removal-request-dialog"
+import { auth } from "@/lib/auth"
 
 export default async function PortalOrderDetailPage({
   params,
@@ -14,6 +15,7 @@ export default async function PortalOrderDetailPage({
   params: Promise<{ clientId: string; id: string }>
 }) {
   const { clientId, id } = await params
+  const session = await auth()
 
   const wo = await prisma.workOrder.findUnique({
     where: { id, clientId },
@@ -50,7 +52,20 @@ export default async function PortalOrderDetailPage({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <RemovalRequestDialog workOrderId={wo.id} />
+          {wo.status === "INSTALLED" && (
+            <RemovalRequestDialog
+              workOrderId={wo.id}
+              prefillName={session?.user?.name ?? ""}
+              prefillEmail={session?.user?.email ?? ""}
+              address={[
+                wo.addressLine1,
+                wo.addressLine2,
+                `${wo.city}, ${wo.state} ${wo.postalCode}`,
+              ]
+                .filter(Boolean)
+                .join(", ")}
+            />
+          )}
           <span
             className={`text-sm px-3 py-1 rounded-full font-medium ${
               WO_STATUS_COLORS[wo.status] ?? "bg-gray-100 text-gray-700"

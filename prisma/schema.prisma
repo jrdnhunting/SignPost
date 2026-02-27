@@ -222,6 +222,8 @@ model Client {
   clientNotesPublic  String?
   /// Notes visible to staff and technicians only — never shown to client portal users.
   clientNotesPrivate String?
+  /// Additional emails that receive order update notifications.
+  notificationEmails String[] @default([])
   createdAt          DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

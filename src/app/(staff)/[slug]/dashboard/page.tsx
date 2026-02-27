@@ -1,9 +1,10 @@
 export const dynamic = "force-dynamic"
 
+import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
-import { formatAddress, formatClientName } from "@/lib/utils"
+import { formatAddress, formatClientName, formatOrderId } from "@/lib/utils"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { WO_STATUS_COLORS, WO_STATUS_LABELS } from "@/lib/constants"
+import { WO_STATUS_COLORS, WO_STATUS_LABELS, TASK_TYPE_LABELS, TASK_TYPE_COLORS } from "@/lib/constants"
 import Link from "next/link"
 
 export default async function DashboardPage({
@@ -12,6 +13,7 @@ export default async function DashboardPage({
   params: Promise<{ slug: string }>
 }) {
   const { slug } = await params
+  const session = await auth()
   const org = await prisma.organization.findUniqueOrThrow({ where: { slug } })
 
   const [totalOrders, pendingOrders, activeOrders, clients, invoices] =
@@ -32,12 +34,25 @@ export default async function DashboardPage({
       }),
     ])
 
-  const recentOrders = await prisma.workOrder.findMany({
-    where: { organizationId: org.id },
-    include: { client: true },
-    orderBy: { createdAt: "desc" },
-    take: 5,
-  })
+  const [recentOrders, myTasks] = await Promise.all([
+    prisma.workOrder.findMany({
+      where: { organizationId: org.id },
+      include: { client: true },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+    session?.user?.userId
+      ? prisma.task.findMany({
+          where: {
+            assignedToId: session.user.userId,
+            status: { in: ["PENDING", "IN_PROGRESS"] },
+            workOrder: { organizationId: org.id },
+          },
+          include: { workOrder: { include: { client: true } } },
+          orderBy: [{ workOrder: { orderId: "asc" } }, { taskNumber: "asc" }],
+        })
+      : Promise.resolve([]),
+  ])
 
   return (
     <div className="p-8">
@@ -85,6 +100,51 @@ export default async function DashboardPage({
           </CardContent>
         </Card>
       </div>
+
+      {/* My Tasks */}
+      <Card className="mb-6">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>My Tasks</CardTitle>
+          <Link href={`/${slug}/tasks?mine=1`} className="text-sm text-blue-600 hover:underline">
+            View all
+          </Link>
+        </CardHeader>
+        <CardContent>
+          {myTasks.length === 0 ? (
+            <p className="text-sm text-gray-500 py-2">No pending tasks assigned to you.</p>
+          ) : (
+            <div className="divide-y">
+              {myTasks.map((task) => (
+                <div key={task.id} className="py-3 flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs text-gray-400">
+                        {formatOrderId(task.workOrder.orderId)}-{String(task.taskNumber).padStart(2, "0")}
+                      </span>
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          TASK_TYPE_COLORS[task.taskType] ?? "bg-gray-100 text-gray-700"
+                        }`}
+                      >
+                        {TASK_TYPE_LABELS[task.taskType] ?? task.taskType}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-600 mt-0.5 truncate">
+                      {formatAddress(task.workOrder)} · {formatClientName(task.workOrder.client)}
+                    </p>
+                  </div>
+                  <Link
+                    href={`/${slug}/orders/${task.workOrderId}`}
+                    className="text-xs text-blue-600 hover:underline shrink-0"
+                  >
+                    View order
+                  </Link>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">

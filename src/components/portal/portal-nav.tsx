@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { signOut } from "next-auth/react"
 import { Button } from "@/components/ui/button"
 import { LogOut } from "lucide-react"
@@ -7,9 +8,10 @@ import { LogOut } from "lucide-react"
 interface PortalNavProps {
   clientName: string
   userName: string
+  clientId: string
 }
 
-export default function PortalNav({ clientName, userName }: PortalNavProps) {
+export default function PortalNav({ clientName, userName, clientId }: PortalNavProps) {
   const initials = userName
     .split(" ")
     .map((part) => part[0])
@@ -31,12 +33,15 @@ export default function PortalNav({ clientName, userName }: PortalNavProps) {
 
       {/* User + sign out */}
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
+        <Link
+          href={`/portal/${clientId}/profile`}
+          className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-gray-100 transition-colors"
+        >
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-700">
             {initials}
           </div>
           <span className="hidden text-sm font-medium text-gray-700 sm:inline">{userName}</span>
-        </div>
+        </Link>
         <Button
           variant="ghost"
           size="sm"

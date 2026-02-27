@@ -93,7 +93,9 @@ export default async function OrderDetailPage({
             <p className="text-gray-500 mt-1">{wo.client.firstName} {wo.client.lastName}{wo.client.companyName ? ` · ${wo.client.companyName}` : ""}</p>
           </div>
           <div className="flex items-center gap-2">
-            <RemovalRequestDialog workOrderId={wo.id} />
+            {wo.status === "INSTALLED" && (
+              <RemovalRequestDialog workOrderId={wo.id} />
+            )}
             <Button variant="outline" asChild>
               <Link href={`/${slug}/orders/${id}/edit`}>Edit</Link>
             </Button>

@@ -12,6 +12,7 @@ import {
   Settings,
   LogOut,
   CheckSquare,
+  UserCircle,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -95,10 +96,13 @@ export default function Sidebar({ orgSlug, userName, userEmail }: SidebarProps) 
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-600 text-xs font-semibold text-white">
             {initials}
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-white">{userName}</p>
-            <p className="truncate text-xs text-gray-400">{userEmail}</p>
-          </div>
+          <Link
+            href={`/${orgSlug}/profile`}
+            className="min-w-0 flex-1 group"
+          >
+            <p className="truncate text-sm font-medium text-white group-hover:text-gray-300">{userName}</p>
+            <p className="truncate text-xs text-gray-400 group-hover:text-gray-500">{userEmail}</p>
+          </Link>
           <Button
             variant="ghost"
             size="icon"

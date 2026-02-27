@@ -9,15 +9,23 @@ import { Trash2, X } from "lucide-react"
 
 interface RemovalRequestDialogProps {
   workOrderId: string
+  prefillName?: string
+  prefillEmail?: string
+  address?: string
 }
 
-export function RemovalRequestDialog({ workOrderId }: RemovalRequestDialogProps) {
+export function RemovalRequestDialog({
+  workOrderId,
+  prefillName = "",
+  prefillEmail = "",
+  address = "",
+}: RemovalRequestDialogProps) {
   const [open, setOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
   const [submitted, setSubmitted] = useState(false)
-  const [requesterName, setRequesterName] = useState("")
+  const [requesterName, setRequesterName] = useState(prefillName)
   const [requesterPhone, setRequesterPhone] = useState("")
-  const [requesterEmail, setRequesterEmail] = useState("")
+  const [requesterEmail, setRequesterEmail] = useState(prefillEmail)
   const [preferredDate, setPreferredDate] = useState("")
   const [notes, setNotes] = useState("")
   const [error, setError] = useState("")
@@ -49,9 +57,9 @@ export function RemovalRequestDialog({ workOrderId }: RemovalRequestDialogProps)
   function handleClose() {
     setOpen(false)
     setSubmitted(false)
-    setRequesterName("")
+    setRequesterName(prefillName)
     setRequesterPhone("")
-    setRequesterEmail("")
+    setRequesterEmail(prefillEmail)
     setPreferredDate("")
     setNotes("")
     setError("")
@@ -101,6 +109,13 @@ export function RemovalRequestDialog({ workOrderId }: RemovalRequestDialogProps)
                     Submit a request to have the sign removed. We will contact you to confirm.
                   </p>
                 </div>
+
+                {address && (
+                  <div className="bg-gray-50 border rounded-md px-3 py-2 text-sm">
+                    <p className="text-xs text-gray-500 mb-0.5 font-medium uppercase tracking-wide">Sign location</p>
+                    <p className="text-gray-900">{address}</p>
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <Label htmlFor="rr-name">Your Name *</Label>
