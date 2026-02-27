@@ -1,0 +1,548 @@
+// ╔══════════════════════════════════════════════════════════════════════════╗
+// ║  SignPost — Multi-Tenant Sign Installation SaaS                         ║
+// ║  Prisma Schema  •  PostgreSQL                                            ║
+// ║                                                                          ║
+// ║  V1 address policy:                                                      ║
+// ║    • Address fields are stored flat on WorkOrder.                        ║
+// ║    • There is NO shared Property / Location table.                       ║
+// ║    • Addresses are NEVER deduplicated.                                   ║
+// ║    • Two WorkOrders at identical addresses are distinct rows.            ║
+// ║    • Lifecycle tracking is by WorkOrder.id only.                         ║
+// ╚══════════════════════════════════════════════════════════════════════════╝
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENUMS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Roles a staff User can hold within an Organization.
+/// CLIENT is reserved for future portal-linked staff; portal users use ClientUser.
+enum MemberRole {
+  ADMIN
+  DISPATCHER
+  TECHNICIAN
+  CLIENT
+}
+
+/// High-level lifecycle state of a WorkOrder.
+enum WorkOrderStatus {
+  DRAFT        // created but not yet submitted by the client
+  SUBMITTED    // client has submitted; awaiting dispatcher review
+  SCHEDULED    // dispatcher has set a scheduledDate and assigned technicians
+  IN_PROGRESS  // at least one technician has clocked in
+  COMPLETED    // all work confirmed done
+  ON_HOLD      // paused pending materials, access, weather, etc.
+  CANCELLED    // voided before completion
+}
+
+enum WorkOrderPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+/// Status of a single technician's assignment to a WorkOrder.
+enum AssignmentStatus {
+  PENDING   // dispatched, awaiting technician acknowledgement
+  ACCEPTED  // technician confirmed
+  DECLINED  // technician declined (dispatcher must re-assign)
+  COMPLETED // technician marked their portion done
+}
+
+/// Contextual bucket for a photo attached to a WorkOrder.
+enum PhotoContext {
+  BEFORE  // site condition before installation
+  DURING  // work in progress
+  AFTER   // completed installation
+  ISSUE   // problem documented on site
+}
+
+/// Direction / reason for an inventory movement.
+enum InventoryTxType {
+  RESTOCK    // materials received into stock
+  CONSUME    // materials used on a work order
+  ADJUSTMENT // manual correction (count, damage write-off, etc.)
+  RETURN     // unused materials returned to stock from a job
+}
+
+enum InvoiceStatus {
+  DRAFT   // being built; not sent to client
+  SENT    // delivered to client
+  PARTIAL // at least one payment recorded but balance remains
+  PAID    // fully paid
+  VOID    // cancelled invoice
+}
+
+enum PaymentMethod {
+  CASH
+  CHECK
+  CREDIT_CARD
+  ACH
+  OTHER
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ORGANIZATION  —  tenant root
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// One row per SaaS tenant (a sign installation company).
+/// Every other model is scoped to an Organization.
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  /// URL-safe identifier used in routing / subdomain (e.g. "acme-signs").
+  slug      String   @unique
+  logoUrl   String?
+  /// Subscription plan identifier — enforced at app layer, not DB.
+  plan      String   @default("starter")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships        Membership[]
+  clients            Client[]
+  workOrders         WorkOrder[]
+  inventoryItemTypes InventoryItemType[]
+  invoices           Invoice[]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// USER  —  staff member (admin, dispatcher, technician)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Platform user belonging to one or more Organizations via Membership.
+/// Distinct from ClientUser — staff only.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  phone        String?
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  memberships Membership[]
+  assignments Assignment[]
+  workLogs    WorkLog[]
+  photos      Photo[]
+  /// Work orders this staff member entered on behalf of a client.
+  workOrders  WorkOrder[] @relation("CreatedByStaff")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MEMBERSHIP  —  User ↔ Organization with role
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Join table that grants a User access to an Organization under a specific role.
+/// A user may belong to multiple organizations (e.g. a contractor).
+model Membership {
+  id             String     @id @default(cuid())
+  organizationId String
+  userId         String
+  role           MemberRole
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  /// One role per user per organization.
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([userId])
+  /// Quickly fetch all technicians (or admins) for an org.
+  @@index([organizationId, role])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CLIENT  —  customer account
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A client company or individual that orders sign work from an Organization.
+/// One Organization can serve many Clients.
+model Client {
+  id             String   @id @default(cuid())
+  organizationId String
+  companyName    String
+  /// Primary human contact name (optional — some clients are sole proprietors).
+  contactName    String?
+  email          String?
+  phone          String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  clientUsers  ClientUser[]
+  workOrders   WorkOrder[]
+  invoices     Invoice[]
+
+  @@index([organizationId])
+  @@index([organizationId, companyName])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CLIENT USER  —  portal login for a Client
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A human user who authenticates through the client portal.
+/// Separate auth identity from staff User — scoped to one Client.
+model ClientUser {
+  id           String   @id @default(cuid())
+  clientId     String
+  email        String   @unique
+  name         String
+  passwordHash String
+  phone        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  client     Client      @relation(fields: [clientId], references: [id])
+  /// Work orders this portal user submitted.
+  workOrders WorkOrder[] @relation("SubmittedByClientUser")
+
+  @@index([clientId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORK ORDER
+//
+// V1 address policy — READ CAREFULLY:
+//   ▸ All address fields live directly on this model.
+//   ▸ There is intentionally NO foreign key to a Property or Location table.
+//   ▸ Clients type (or paste) an address anew each time they create an order.
+//   ▸ Two WorkOrders with identical address strings are INDEPENDENT records.
+//   ▸ No UNIQUE constraint exists on any address column or combination thereof.
+//   ▸ Deduplication / geocoding may be added in a future version but will NOT
+//     be retrofitted by collapsing existing rows.
+// ═══════════════════════════════════════════════════════════════════════════
+
+model WorkOrder {
+  id             String            @id @default(cuid())
+  organizationId String
+  clientId       String
+  /// ClientUser who submitted this order through the portal.
+  /// Null when a dispatcher creates the order on behalf of a client.
+  submittedById  String?
+  /// Staff User who created this record (null when client self-served).
+  createdById    String?
+
+  // ── Address ─────────────────────────────────────────────────────────────
+  // Stored flat per work order. See policy note above.
+  // NO unique constraint. NO index enforcing address uniqueness.
+  addressLine1  String
+  addressLine2  String?
+  city          String
+  state         String             // two-letter code for US, province code for CA
+  postalCode    String
+  country       String             @default("US")
+  /// Freeform field for site access instructions, landmarks, gate codes, etc.
+  locationNotes String?
+
+  // ── Work order details ────────────────────────────────────────────────────
+  title         String?
+  description   String?
+  status        WorkOrderStatus   @default(DRAFT)
+  priority      WorkOrderPriority @default(NORMAL)
+  scheduledDate DateTime?
+  completedAt   DateTime?
+  cancelledAt   DateTime?
+  /// Internal-only notes from dispatcher (not visible on client portal).
+  internalNotes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization          Organization           @relation(fields: [organizationId], references: [id])
+  client                Client                 @relation(fields: [clientId], references: [id])
+  submittedBy           ClientUser?            @relation("SubmittedByClientUser", fields: [submittedById], references: [id])
+  createdBy             User?                  @relation("CreatedByStaff", fields: [createdById], references: [id])
+  items                 WorkOrderItem[]
+  assignments           Assignment[]
+  workLogs              WorkLog[]
+  photos                Photo[]
+  inventoryTransactions InventoryTransaction[]
+  invoices              Invoice[]
+
+  // ── Indexes ──────────────────────────────────────────────────────────────
+  // These indexes support filtering and sorting within a tenant.
+  // None of them imply address uniqueness.
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([organizationId, status])
+  @@index([organizationId, priority])
+  @@index([organizationId, scheduledDate])
+  @@index([organizationId, createdAt])
+  @@index([submittedById])
+  @@index([createdById])
+  /// Geo-filtered list views (e.g. "all jobs in 90210") — non-unique.
+  @@index([organizationId, postalCode])
+  @@index([organizationId, city, state])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORK ORDER ITEM  —  line-item scope of work
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Each row is one deliverable within a WorkOrder
+/// (e.g. "Install 4×8 monument sign", "Permit pulling", "Remove old signage").
+model WorkOrderItem {
+  id          String   @id @default(cuid())
+  workOrderId String
+  description String
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  notes       String?
+  /// Controls display order in the UI.
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
+
+  @@index([workOrderId])
+  @@index([workOrderId, sortOrder])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ASSIGNMENT  —  technician ↔ work order
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Records that a specific technician (User with TECHNICIAN role) has been
+/// dispatched to a WorkOrder.  A single WorkOrder may have multiple Assignments
+/// (crew). Role enforcement happens at the application layer.
+model Assignment {
+  id          String           @id @default(cuid())
+  workOrderId String
+  userId      String
+  status      AssignmentStatus @default(PENDING)
+  /// Dispatcher notes for this technician (route info, special instructions).
+  notes       String?
+  assignedAt  DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+
+  /// Prevent duplicate assignment of the same technician to the same job.
+  @@unique([workOrderId, userId])
+  @@index([workOrderId])
+  @@index([userId])
+  @@index([userId, status])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// WORK LOG  —  time tracking per work order
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A clock-in / clock-out entry recorded by a technician on site.
+/// Multiple WorkLog rows per WorkOrder are normal (breaks, multi-day jobs).
+model WorkLog {
+  id          String    @id @default(cuid())
+  workOrderId String
+  userId      String
+  notes       String?
+  startedAt   DateTime
+  /// Null while the technician is still clocked in.
+  endedAt     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workOrder WorkOrder @relation(fields: [workOrderId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@index([workOrderId])
+  @@index([userId])
+  @@index([workOrderId, startedAt])
+  /// Technician timesheet view.
+  @@index([userId, startedAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHOTO  —  site documentation
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A photo attached to a WorkOrder, categorised by context (before/during/after/issue).
+/// Uploaded by a technician (User); client-portal uploads deferred to V2.
+model Photo {
+  id           String       @id @default(cuid())
+  workOrderId  String
+  /// The technician who uploaded this photo.
+  uploadedById String
+  url          String
+  caption      String?
+  context      PhotoContext @default(AFTER)
+  /// When the photo was physically taken (may differ from createdAt).
+  takenAt      DateTime?
+  createdAt    DateTime     @default(now())
+
+  workOrder  WorkOrder @relation(fields: [workOrderId], references: [id])
+  uploadedBy User      @relation(fields: [uploadedById], references: [id])
+
+  @@index([workOrderId])
+  /// Fetch before/after set for a single job.
+  @@index([workOrderId, context])
+  @@index([uploadedById])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INVENTORY ITEM TYPE  —  catalog of materials / components
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A type of physical material or product stocked by an Organization
+/// (e.g. "4×8 Aluminum Sheet", "Channel Letter 'A'", "Vinyl Roll – White").
+/// currentStock is a denormalised running total maintained by InventoryTransaction.
+model InventoryItemType {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  /// Optional stock-keeping unit code — unique within an org when provided.
+  sku            String?
+  description    String?
+  /// Unit of measure (each, sqft, linear-ft, roll, box, …).
+  unit           String   @default("each")
+  /// Denormalised running total — updated by app layer on each transaction.
+  currentStock   Int      @default(0)
+  /// Alert threshold: dispatcher notified when currentStock falls below this.
+  reorderPoint   Int?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization          @relation(fields: [organizationId], references: [id])
+  transactions InventoryTransaction[]
+
+  /// SKU must be unique within an org; NULL skus are exempt from this constraint.
+  @@unique([organizationId, sku])
+  @@index([organizationId])
+  @@index([organizationId, name])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INVENTORY TRANSACTION  —  stock movements (ledger)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Immutable ledger entry for every stock movement.
+/// quantity is signed: positive = stock added, negative = stock removed.
+/// The app must update InventoryItemType.currentStock after each insert.
+model InventoryTransaction {
+  id                  String          @id @default(cuid())
+  inventoryItemTypeId String
+  /// The WorkOrder that consumed or returned this stock (null for restocks / adjustments).
+  workOrderId         String?
+  type                InventoryTxType
+  /// Positive = stock in (RESTOCK, RETURN, positive ADJUSTMENT).
+  /// Negative = stock out (CONSUME, negative ADJUSTMENT).
+  quantity            Int
+  notes               String?
+  createdAt           DateTime        @default(now())
+
+  inventoryItemType InventoryItemType @relation(fields: [inventoryItemTypeId], references: [id])
+  workOrder         WorkOrder?        @relation(fields: [workOrderId], references: [id])
+
+  @@index([inventoryItemTypeId])
+  @@index([workOrderId])
+  @@index([inventoryItemTypeId, createdAt])
+  @@index([type])
+  @@index([workOrderId, type])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INVOICE
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Billing document issued by an Organization to a Client.
+/// May be tied to a specific WorkOrder or issued as a standalone invoice.
+/// subtotal, taxAmount, discountAmount, and total are denormalised for display
+/// performance; the app layer recalculates them whenever line items change.
+model Invoice {
+  id             String        @id @default(cuid())
+  organizationId String
+  clientId       String
+  /// Nullable — allows standalone invoices not linked to a single job.
+  workOrderId    String?
+  /// Human-readable invoice number (e.g. "INV-2024-0042").
+  invoiceNumber  String
+  status         InvoiceStatus @default(DRAFT)
+  issuedAt       DateTime?
+  dueAt          DateTime?
+  /// Timestamp when status reached PAID.
+  paidAt         DateTime?
+  subtotal       Decimal       @db.Decimal(10, 2) @default(0)
+  taxAmount      Decimal       @db.Decimal(10, 2) @default(0)
+  discountAmount Decimal       @db.Decimal(10, 2) @default(0)
+  total          Decimal       @db.Decimal(10, 2) @default(0)
+  notes          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id])
+  client       Client           @relation(fields: [clientId], references: [id])
+  workOrder    WorkOrder?       @relation(fields: [workOrderId], references: [id])
+  lineItems    InvoiceLineItem[]
+  payments     Payment[]
+
+  /// Invoice numbers are unique within an org's billing sequence.
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([workOrderId])
+  @@index([organizationId, status])
+  @@index([organizationId, dueAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INVOICE LINE ITEM
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// One billable line on an Invoice.
+/// amount is denormalised (quantity × unitPrice) for rendering without computation.
+model InvoiceLineItem {
+  id          String   @id @default(cuid())
+  invoiceId   String
+  description String
+  /// Decimal quantity to support partial units (e.g. 2.5 sqft).
+  quantity    Decimal  @db.Decimal(10, 3) @default(1)
+  unitPrice   Decimal  @db.Decimal(10, 2)
+  /// Denormalised: quantity × unitPrice.  Recomputed by app on save.
+  amount      Decimal  @db.Decimal(10, 2)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@index([invoiceId, sortOrder])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PAYMENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A payment applied against an Invoice.
+/// Multiple payments per invoice are valid (partial payments, split tenders).
+model Payment {
+  id        String        @id @default(cuid())
+  invoiceId String
+  amount    Decimal       @db.Decimal(10, 2)
+  method    PaymentMethod
+  /// External reference: check number, card transaction ID, ACH trace number, etc.
+  reference String?
+  paidAt    DateTime
+  notes     String?
+  createdAt DateTime      @default(now())
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@index([paidAt])
+  @@index([invoiceId, paidAt])
+}
