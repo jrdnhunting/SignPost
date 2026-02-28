@@ -61,3 +61,14 @@ export function formatDateTime(date: Date | string | null | undefined): string {
     minute: "2-digit",
   }).format(d)
 }
+
+/** Derive a payment status label from a work order's invoices. */
+export function derivePaymentStatus(invoices: { status: string }[]): string {
+  if (!invoices.length) return "No Invoice"
+  const statuses = invoices.map((i) => i.status)
+  if (statuses.every((s) => s === "PAID")) return "Paid"
+  if (statuses.some((s) => s === "OVERDUE")) return "Overdue"
+  if (statuses.some((s) => s === "PARTIAL")) return "Partial"
+  if (statuses.some((s) => s === "SENT")) return "Sent"
+  return "Pending"
+}

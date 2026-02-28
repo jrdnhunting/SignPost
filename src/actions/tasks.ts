@@ -209,16 +209,7 @@ export async function getTaskPanelData(taskId: string) {
   return task
 }
 
-/** Derive a payment status label from a work order's invoices. */
-export function derivePaymentStatus(invoices: { status: string }[]): string {
-  if (!invoices.length) return "No Invoice"
-  const statuses = invoices.map((i) => i.status)
-  if (statuses.every((s) => s === "PAID")) return "Paid"
-  if (statuses.some((s) => s === "OVERDUE")) return "Overdue"
-  if (statuses.some((s) => s === "PARTIAL")) return "Partial"
-  if (statuses.some((s) => s === "SENT")) return "Sent"
-  return "Pending"
-}
+// derivePaymentStatus moved to @/lib/utils to avoid "must be async" rule in server action files
 
 // ── Complete task with typed data ──────────────────────────────────────────
 

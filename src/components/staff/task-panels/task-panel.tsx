@@ -1,6 +1,7 @@
 "use client"
 import { useState, useEffect, useCallback } from "react"
-import { getTaskPanelData, derivePaymentStatus } from "@/actions/tasks"
+import { getTaskPanelData } from "@/actions/tasks"
+import { derivePaymentStatus } from "@/lib/utils"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { TASK_TYPE_LABELS } from "@/lib/constants"
 import { formatOrderId } from "@/lib/utils"
