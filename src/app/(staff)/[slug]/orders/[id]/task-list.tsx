@@ -1,8 +1,7 @@
 "use client"
 import { useState, useTransition } from "react"
-import { updateTaskStatus, createTask } from "@/actions/tasks"
+import { createTask } from "@/actions/tasks"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -19,7 +18,9 @@ import {
   TASK_TYPE_COLORS,
 } from "@/lib/constants"
 import { formatDate, formatOrderId } from "@/lib/utils"
-import { Check, Clock, Plus, X } from "lucide-react"
+import { Plus } from "lucide-react"
+import { TaskPanel } from "@/components/staff/task-panels/task-panel"
+import { useRouter } from "next/navigation"
 
 interface Task {
   id: string
@@ -52,35 +53,14 @@ export function TaskList({
   staffMembers,
   canCreateTasks,
 }: TaskListProps) {
+  const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const [completingTask, setCompletingTask] = useState<string | null>(null)
-  const [confirmScheduledDate, setConfirmScheduledDate] = useState("")
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [newTaskType, setNewTaskType] = useState<string>("")
   const [newTaskAssignee, setNewTaskAssignee] = useState<string>("none")
   const [newTaskNotes, setNewTaskNotes] = useState("")
 
-  function handleComplete(task: Task) {
-    if (task.taskType === "CONFIRM_ORDER") {
-      // Must enter scheduled install date before completing
-      setCompletingTask(task.id)
-    } else {
-      startTransition(async () => {
-        await updateTaskStatus(task.id, "COMPLETED", { orgSlug })
-      })
-    }
-  }
-
-  function handleConfirmOrderComplete(taskId: string) {
-    startTransition(async () => {
-      await updateTaskStatus(taskId, "COMPLETED", {
-        scheduledDate: confirmScheduledDate || undefined,
-        orgSlug,
-      })
-      setCompletingTask(null)
-      setConfirmScheduledDate("")
-    })
-  }
+  const [openPanelTaskId, setOpenPanelTaskId] = useState<string | null>(null)
 
   function handleCreateTask() {
     if (!newTaskType) return
@@ -115,13 +95,14 @@ export function TaskList({
       {tasks.length === 0 && (
         <p className="text-gray-500 text-sm">No tasks for this order.</p>
       )}
+
       {tasks.map((task) => (
-        <div
+        <button
           key={task.id}
-          className={`border rounded-lg p-4 ${
-            task.status === "COMPLETED"
-              ? "bg-gray-50 opacity-75"
-              : "bg-white"
+          type="button"
+          onClick={() => setOpenPanelTaskId(task.id)}
+          className={`w-full text-left border rounded-lg p-4 transition-colors hover:border-blue-300 hover:bg-blue-50/40 ${
+            task.status === "COMPLETED" ? "bg-gray-50 opacity-75" : "bg-white"
           }`}
         >
           <div className="flex items-start justify-between gap-4">
@@ -156,11 +137,6 @@ export function TaskList({
                   {task.requesterPhone && ` · ${task.requesterPhone}`}
                 </p>
               )}
-              {task.preferredDate && (
-                <p className="text-xs text-gray-500 mt-1">
-                  Preferred date: {formatDate(task.preferredDate)}
-                </p>
-              )}
               {task.scheduledDate && (
                 <p className="text-xs text-gray-500 mt-1">
                   Scheduled: {formatDate(task.scheduledDate)}
@@ -175,54 +151,9 @@ export function TaskList({
                 </p>
               )}
             </div>
-
-            {/* Actions */}
-            {task.status !== "COMPLETED" && task.status !== "CANCELLED" && (
-              <div className="shrink-0">
-                {task.taskType === "CONFIRM_ORDER" && completingTask === task.id ? (
-                  <div className="flex flex-col gap-2 items-end">
-                    <div className="space-y-1">
-                      <Label className="text-xs">Scheduled Install Date</Label>
-                      <Input
-                        type="date"
-                        className="text-xs h-8"
-                        value={confirmScheduledDate}
-                        onChange={(e) => setConfirmScheduledDate(e.target.value)}
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        disabled={isPending}
-                        onClick={() => handleConfirmOrderComplete(task.id)}
-                      >
-                        <Check className="h-3 w-3 mr-1" />
-                        Confirm
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => { setCompletingTask(null); setConfirmScheduledDate("") }}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={isPending}
-                    onClick={() => handleComplete(task)}
-                  >
-                    <Check className="h-3 w-3 mr-1" />
-                    Complete
-                  </Button>
-                )}
-              </div>
-            )}
+            <span className="text-xs text-blue-500 shrink-0 mt-1">Open →</span>
           </div>
-        </div>
+        </button>
       ))}
 
       {/* Create Task */}
@@ -296,7 +227,7 @@ export function TaskList({
                   onClick={() => {
                     setShowCreateForm(false)
                     setNewTaskType("")
-                    setNewTaskAssignee("")
+                    setNewTaskAssignee("none")
                     setNewTaskNotes("")
                   }}
                 >
@@ -306,6 +237,17 @@ export function TaskList({
             </div>
           )}
         </>
+      )}
+
+      {/* Task panel dialog */}
+      {openPanelTaskId && (
+        <TaskPanel
+          taskId={openPanelTaskId}
+          orgSlug={orgSlug}
+          open={!!openPanelTaskId}
+          onOpenChange={(open) => { if (!open) setOpenPanelTaskId(null) }}
+          onCompleted={() => router.refresh()}
+        />
       )}
     </div>
   )

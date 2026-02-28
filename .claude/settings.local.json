@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(brew:*)",
+      "Bash(export:*)",
+      "Bash(openssl rand:*)",
+      "Bash(node:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx prisma:*)",
+      "Bash(head:*)",
+      "Bash(grep:*)",
+      "Bash(npm run:*)",
+      "Bash(ls:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

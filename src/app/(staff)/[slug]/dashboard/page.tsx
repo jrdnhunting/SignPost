@@ -118,9 +118,11 @@ export default async function DashboardPage({
                 <div key={task.id} className="py-3 flex items-center justify-between gap-4">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs text-gray-400">
-                        {formatOrderId(task.workOrder.orderId)}-{String(task.taskNumber).padStart(2, "0")}
-                      </span>
+                      {task.workOrder && (
+                        <span className="font-mono text-xs text-gray-400">
+                          {formatOrderId(task.workOrder.orderId)}-{String(task.taskNumber).padStart(2, "0")}
+                        </span>
+                      )}
                       <span
                         className={`text-xs px-2 py-0.5 rounded-full font-medium ${
                           TASK_TYPE_COLORS[task.taskType] ?? "bg-gray-100 text-gray-700"
@@ -129,16 +131,20 @@ export default async function DashboardPage({
                         {TASK_TYPE_LABELS[task.taskType] ?? task.taskType}
                       </span>
                     </div>
-                    <p className="text-sm text-gray-600 mt-0.5 truncate">
-                      {formatAddress(task.workOrder)} · {formatClientName(task.workOrder.client)}
-                    </p>
+                    {task.workOrder && (
+                      <p className="text-sm text-gray-600 mt-0.5 truncate">
+                        {formatAddress(task.workOrder)} · {formatClientName(task.workOrder.client)}
+                      </p>
+                    )}
                   </div>
-                  <Link
-                    href={`/${slug}/orders/${task.workOrderId}`}
-                    className="text-xs text-blue-600 hover:underline shrink-0"
-                  >
-                    View order
-                  </Link>
+                  {task.workOrderId && (
+                    <Link
+                      href={`/${slug}/orders/${task.workOrderId}`}
+                      className="text-xs text-blue-600 hover:underline shrink-0"
+                    >
+                      View order
+                    </Link>
+                  )}
                 </div>
               ))}
             </div>

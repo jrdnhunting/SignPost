@@ -680,7 +680,8 @@ model ServiceAreaTechnician {
 /// taskNumber is sequential per work order (1-based); displayed as ORDERID-TASKNUM.
 model Task {
   id          String     @id @default(cuid())
-  workOrderId String
+  /// Nullable to support anonymous removal requests not yet matched to an order.
+  workOrderId String?
   taskType    TaskType
   /// 1-based sequential number within the work order (e.g. 1, 2, 3…).
   taskNumber  Int
@@ -691,20 +692,23 @@ model Task {
   requesterName  String?
   requesterPhone String?
   requesterEmail String?
+  /// For unlinked anonymous submissions: the address submitted on the form.
+  submissionAddress String?
   // ── Scheduling ────────────────────────────────────────────────────────────
   /// Preferred date provided by the requestor (removal requests).
   preferredDate  DateTime?
   /// Proposed/confirmed scheduled date (set when CONFIRM_ORDER is completed).
   scheduledDate  DateTime?
   notes          String?
+  /// Stores task-type-specific completion data as JSON.
+  completionData Json?
   completedAt    DateTime?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  workOrder  WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
-  assignedTo User?     @relation(fields: [assignedToId], references: [id])
+  workOrder  WorkOrder? @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  assignedTo User?      @relation(fields: [assignedToId], references: [id])
 
-  @@unique([workOrderId, taskNumber])
   @@index([workOrderId])
   @@index([assignedToId])
   @@index([assignedToId, status])
