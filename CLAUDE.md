@@ -94,6 +94,24 @@ Multi-tenant sign installation SaaS (Prisma + PostgreSQL).
 - Components: `src/components/portal/masquerade-banner.tsx`, `src/app/(superadmin)/superadmin/[orgId]/masquerade-button.tsx`
 - Migration: `20260304010000_super_admin` — `ALTER TABLE "User" ADD COLUMN "isSuperAdmin" BOOLEAN NOT NULL DEFAULT false`
 
+## Archive orders
+- `WorkOrder.archivedAt DateTime?` (migration 20260304030000_archive_orders) — soft delete
+- `archiveWorkOrder` / `unarchiveWorkOrder` in `src/actions/work-orders.ts`
+- All queries (dashboard, client detail, portal, tasks) filter `archivedAt: null` — only orders list "Archived" tab uses `archivedAt: { not: null }`
+- Archive button on order detail: confirms before archiving, redirects to orders list; Unarchive requires no confirm
+- Orders list uses `?archived=1` searchParam for the Archived tab
+
+## Orders page filters
+- searchParams: `status`, `q`, `archived`, `clientId`, `serviceAreaId`
+- `OrdersFilterBar` client component at `src/components/staff/orders-filter-bar.tsx` — single bar with search input + client dropdown + service area dropdown
+- Status tabs preserve `clientId` and `serviceAreaId` params via `tabHref()` helper
+- Service Area column added to orders table (shows zone name or dash)
+- Portal pages must NOT add their own auth guard on top of the layout — the layout already handles auth + masquerade; adding a redundant guard breaks super admin masquerade
+
+## Prisma migration pattern (non-interactive environment)
+- `prisma migrate dev` is interactive-only and will error — always use:
+  `npx prisma migrate deploy && npx prisma generate`
+
 ## Task panel system
 - Tasks are clickable in both the Tasks page and order detail view — opens a `TaskPanel` dialog
 - `src/components/staff/task-panels/` contains all 6 panel types + shared GPS/photo upload components
