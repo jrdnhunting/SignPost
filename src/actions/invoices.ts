@@ -35,7 +35,7 @@ export async function createInvoice(data: {
     },
   })
   revalidatePath(`/${orgSlug}/invoices`)
-  return invoice
+  return serializeInvoice(invoice)
 }
 
 export async function addLineItem(invoiceId: string, data: {
@@ -55,7 +55,7 @@ export async function addLineItem(invoiceId: string, data: {
   })
   await recalcInvoice(invoiceId)
   revalidatePath(`/${orgSlug}/invoices/${invoiceId}`)
-  return item
+  return serializeLineItem(item)
 }
 
 export async function removeLineItem(id: string, invoiceId: string, orgSlug: string) {
@@ -97,7 +97,7 @@ export async function recordPayment(invoiceId: string, data: {
     },
   })
   revalidatePath(`/${orgSlug}/invoices/${invoiceId}`)
-  return payment
+  return { ...payment, amount: String(payment.amount) }
 }
 
 export async function updateInvoiceStatus(id: string, status: string, orgSlug: string) {
@@ -109,5 +109,24 @@ export async function updateInvoiceStatus(id: string, status: string, orgSlug: s
     },
   })
   revalidatePath(`/${orgSlug}/invoices/${id}`)
-  return invoice
+  return serializeInvoice(invoice)
+}
+
+function serializeInvoice<T extends { subtotal: object; taxAmount: object; discountAmount: object; total: object }>(inv: T) {
+  return {
+    ...inv,
+    subtotal: String(inv.subtotal),
+    taxAmount: String(inv.taxAmount),
+    discountAmount: String(inv.discountAmount),
+    total: String(inv.total),
+  }
+}
+
+function serializeLineItem<T extends { quantity: object; unitPrice: object; amount: object }>(item: T) {
+  return {
+    ...item,
+    quantity: String(item.quantity),
+    unitPrice: String(item.unitPrice),
+    amount: String(item.amount),
+  }
 }

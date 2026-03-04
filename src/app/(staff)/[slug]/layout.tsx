@@ -19,9 +19,26 @@ export default async function StaffLayout({
     redirect("/login")
   }
 
-  // Verify membership
   const org = await prisma.organization.findUnique({ where: { slug } })
   if (!org) redirect("/")
+
+  // Super admin bypasses membership check
+  if (session.user.isSuperAdmin) {
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: session.user.userId } })
+    return (
+      <div className="flex min-h-screen">
+        <Sidebar
+          orgSlug={slug}
+          userName={user.name}
+          userEmail={user.email}
+          isSuperAdmin
+        />
+        <main className="flex-1 ml-60 bg-gray-50 min-h-screen">
+          {children}
+        </main>
+      </div>
+    )
+  }
 
   const membership = await prisma.membership.findFirst({
     where: {

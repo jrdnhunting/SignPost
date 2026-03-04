@@ -34,11 +34,39 @@ export default auth(function middleware(req: NextAuthRequest) {
     return NextResponse.next()
   }
 
-  // Portal routes — client session with matching clientId
+  // Super admin routes — must be staff + isSuperAdmin
+  if (pathname.startsWith("/superadmin")) {
+    const userType = (session?.user as { type?: string } | undefined)?.type
+    const isSuperAdmin = (session?.user as { isSuperAdmin?: boolean } | undefined)?.isSuperAdmin
+    if (!session?.user || userType !== "staff" || !isSuperAdmin) {
+      return NextResponse.redirect(new URL("/login", req.url))
+    }
+    return NextResponse.next()
+  }
+
+  // Portal routes — client session with matching clientId, OR super admin masquerade
   const portalMatch = pathname.match(/^\/portal\/([^/]+)/)
   if (portalMatch) {
     const clientId = portalMatch[1]
     const userType = (session?.user as { type?: string } | undefined)?.type
+    const isSuperAdmin = (session?.user as { isSuperAdmin?: boolean } | undefined)?.isSuperAdmin
+
+    // Super admin with masquerade cookie bypasses normal client auth
+    if (userType === "staff" && isSuperAdmin) {
+      const masqCookie = req.cookies.get("signpost-masquerade")?.value
+      if (masqCookie) {
+        try {
+          const masq = JSON.parse(masqCookie)
+          if (masq.clientId === clientId) {
+            return NextResponse.next()
+          }
+        } catch {
+          // Invalid cookie — fall through to normal check
+        }
+      }
+      return NextResponse.redirect(new URL("/login", req.url))
+    }
+
     const sessionClientId = (session?.user as { clientId?: string } | undefined)?.clientId
     if (!session?.user || userType !== "client" || sessionClientId !== clientId) {
       return NextResponse.redirect(new URL("/portal/login", req.url))
@@ -47,7 +75,7 @@ export default auth(function middleware(req: NextAuthRequest) {
   }
 
   // Staff org routes — first segment is an org slug
-  const topLevelRoutes = ["api", "login", "portal", "technician", "_next", "favicon.ico"]
+  const topLevelRoutes = ["api", "login", "portal", "technician", "superadmin", "signup", "_next", "favicon.ico"]
   const firstSegment = pathname.split("/")[1]
   if (firstSegment && !topLevelRoutes.includes(firstSegment)) {
     const userType = (session?.user as { type?: string } | undefined)?.type

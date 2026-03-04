@@ -49,6 +49,7 @@ Multi-tenant sign installation SaaS (Prisma + PostgreSQL).
 - Payment (multiple per invoice, PaymentMethod enum, reference field)
 - ServiceArea (GeoJSON polygon zone per org; pricingAdjustment Decimal?)
 - ServiceAreaTechnician (User ↔ ServiceArea join, @@unique([serviceAreaId, userId]))
+- ClientAsset (client-owned branded panels/riders/signs; location: workOrderId OR userId OR locationLabel)
 
 ## Membership unique key change (migration 20260227240000)
 - Old: @@unique([organizationId, userId]) → one role per user per org
@@ -71,6 +72,27 @@ Multi-tenant sign installation SaaS (Prisma + PostgreSQL).
 - Invoice totals (subtotal/taxAmount/discountAmount/total) are denormalised — app recalculates on line item changes.
 - Photos uploaded by staff (User) only in V1; client portal uploads deferred to V2.
 - All monetary values use `Decimal @db.Decimal(10, 2)`; quantity in InvoiceLineItem uses `Decimal(10,3)`.
+
+## Client Asset tracking
+- `ClientAsset` model: client-owned branded items (AssetCategory enum: SIGN_PANEL/SIGN_RIDER/INFO_BOX/YARD_SIGN)
+- Location: `locationWorkOrderId` (deployed at WO address) OR `locationUserId` (stored with tech) OR `locationLabel` (free-form), all nullable
+- Staff UI: `/[slug]/inventory` → "Client Assets" tab (tabbed via `InventoryTabs` client component)
+- Staff components: `client-assets-section.tsx`, `add-client-asset-form.tsx`, `move-asset-form.tsx`
+- Server actions: `src/actions/client-assets.ts` (createClientAsset, updateClientAsset, moveClientAsset, deleteClientAsset)
+- Portal: `/portal/[clientId]/assets` — read-only table; "Assets" nav link in `portal-nav.tsx`
+- `formatAssetCategory()` helper in `src/lib/utils.ts`
+
+## Super Admin / Masquerade
+- `User.isSuperAdmin Boolean @default(false)` — stored in JWT; readable in edge middleware
+- Super admin bypasses Membership gate in `[slug]/layout.tsx` and can access any org
+- Route group `src/app/(superadmin)/superadmin/` — layout guards `isSuperAdmin`; lists all orgs + per-org staff/client tables
+- Masquerade: `startClientMasquerade()` sets httpOnly cookie `signpost-masquerade = { clientId, clientName, returnOrgId, originalUserId }`
+- Middleware allows portal access when `isSuperAdmin + cookie.clientId === URL clientId`
+- Portal layout reads cookie; renders `MasqueradeBanner` (amber sticky bar) when masquerading
+- `stopMasquerade()` deletes cookie, redirects to `/superadmin/[returnOrgId]`
+- Server actions: `src/actions/masquerade.ts` (startClientMasquerade, stopMasquerade)
+- Components: `src/components/portal/masquerade-banner.tsx`, `src/app/(superadmin)/superadmin/[orgId]/masquerade-button.tsx`
+- Migration: `20260304010000_super_admin` — `ALTER TABLE "User" ADD COLUMN "isSuperAdmin" BOOLEAN NOT NULL DEFAULT false`
 
 ## Task panel system
 - Tasks are clickable in both the Tasks page and order detail view — opens a `TaskPanel` dialog

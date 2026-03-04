@@ -25,7 +25,13 @@ const workOrderSchema = z.object({
   serviceAreaFee: z.string().optional().nullable(),
 })
 
-export async function createWorkOrder(data: z.infer<typeof workOrderSchema>, orgSlug: string) {
+type OrderItem = { description: string; quantity: number; unitPrice: number }
+
+export async function createWorkOrder(
+  data: z.infer<typeof workOrderSchema>,
+  orgSlug: string,
+  items: OrderItem[] = []
+) {
   const parsed = workOrderSchema.parse(data)
 
   // Find the org admin to assign as order owner
@@ -52,6 +58,18 @@ export async function createWorkOrder(data: z.infer<typeof workOrderSchema>, org
       },
     })
 
+    if (items.length > 0) {
+      await tx.workOrderItem.createMany({
+        data: items.map((item, i) => ({
+          workOrderId: created.id,
+          description: item.description,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          sortOrder: i,
+        })),
+      })
+    }
+
     // Auto-create initial task: Utility Marking (admin-created orders start at CONFIRMED)
     await createInitialTask(tx, created.id, "CONFIRMED", ownerId)
 
@@ -59,7 +77,7 @@ export async function createWorkOrder(data: z.infer<typeof workOrderSchema>, org
   })
 
   revalidatePath(`/${orgSlug}/orders`)
-  return wo
+  return { ...wo, serviceAreaFee: wo.serviceAreaFee ? String(wo.serviceAreaFee) : null }
 }
 
 export async function updateWorkOrder(id: string, data: Partial<z.infer<typeof workOrderSchema>>, orgSlug: string) {
@@ -74,7 +92,7 @@ export async function updateWorkOrder(id: string, data: Partial<z.infer<typeof w
   })
   revalidatePath(`/${orgSlug}/orders`)
   revalidatePath(`/${orgSlug}/orders/${id}`)
-  return wo
+  return { ...wo, serviceAreaFee: wo.serviceAreaFee ? String(wo.serviceAreaFee) : null }
 }
 
 export async function updateWorkOrderStatus(id: string, status: string, orgSlug: string) {
@@ -87,7 +105,7 @@ export async function updateWorkOrderStatus(id: string, status: string, orgSlug:
     },
   })
   revalidatePath(`/${orgSlug}/orders/${id}`)
-  return wo
+  return { ...wo, serviceAreaFee: wo.serviceAreaFee ? String(wo.serviceAreaFee) : null }
 }
 
 export async function addWorkOrderItem(workOrderId: string, data: { description: string; quantity: number; unitPrice: number; notes?: string }, orgSlug: string) {
@@ -101,12 +119,24 @@ export async function addWorkOrderItem(workOrderId: string, data: { description:
     },
   })
   revalidatePath(`/${orgSlug}/orders/${workOrderId}`)
-  return item
+  return { ...item, unitPrice: String(item.unitPrice) }
 }
 
 export async function deleteWorkOrderItem(id: string, workOrderId: string, orgSlug: string) {
   await prisma.workOrderItem.delete({ where: { id } })
   revalidatePath(`/${orgSlug}/orders/${workOrderId}`)
+}
+
+export async function archiveWorkOrder(id: string, orgSlug: string) {
+  await prisma.workOrder.update({ where: { id }, data: { archivedAt: new Date() } })
+  revalidatePath(`/${orgSlug}/orders`)
+  revalidatePath(`/${orgSlug}/orders/${id}`)
+}
+
+export async function unarchiveWorkOrder(id: string, orgSlug: string) {
+  await prisma.workOrder.update({ where: { id }, data: { archivedAt: null } })
+  revalidatePath(`/${orgSlug}/orders`)
+  revalidatePath(`/${orgSlug}/orders/${id}`)
 }
 
 // Portal: client submits a new work order
@@ -169,5 +199,5 @@ export async function submitPortalOrder(data: {
   })
 
   revalidatePath(`/portal/${data.clientId}/orders`)
-  return wo
+  return { ...wo, serviceAreaFee: wo.serviceAreaFee ? String(wo.serviceAreaFee) : null }
 }

@@ -108,6 +108,13 @@ enum PaymentMethod {
   OTHER
 }
 
+enum AssetCategory {
+  SIGN_PANEL
+  SIGN_RIDER
+  INFO_BOX
+  YARD_SIGN
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ORGANIZATION  —  tenant root
 // ═══════════════════════════════════════════════════════════════════════════
@@ -121,7 +128,16 @@ model Organization {
   slug      String   @unique
   logoUrl   String?
   /// Subscription plan identifier — enforced at app layer, not DB.
-  plan           String   @default("starter")
+  plan                 String   @default("starter")
+  /// Billing & subscription — managed by super admins only.
+  subscriptionStatus   String   @default("TRIALING")  // TRIALING | ACTIVE | PAST_DUE | PAUSED | CANCELLED
+  billingCycle         String   @default("MONTHLY")    // MONTHLY | ANNUAL
+  monthlyRate          Decimal? @db.Decimal(10, 2)
+  trialEndsAt          DateTime?
+  currentPeriodEnd     DateTime?
+  stripeCustomerId     String?
+  billingEmail         String?
+  billingNotes         String?
   /// Monotonically-increasing counter used to assign orderId on WorkOrders.
   /// Incremented atomically inside a transaction when each WO is created.
   nextOrderSeq   Int      @default(0)
@@ -147,6 +163,7 @@ model Organization {
   inventoryItemTypes InventoryItemType[]
   invoices           Invoice[]
   serviceAreas       ServiceArea[]
+  clientAssets       ClientAsset[]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -162,6 +179,7 @@ model User {
   passwordHash String
   phone        String?
   avatarUrl    String?
+  isSuperAdmin Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -175,6 +193,7 @@ model User {
   ownedWorkOrders WorkOrder[] @relation("OwnedByUser")
   serviceAreaAssignments ServiceAreaTechnician[]
   assignedTasks Task[]
+  storedAssets  ClientAsset[] @relation("AssetStoredWithTech")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -232,6 +251,7 @@ model Client {
   workOrders      WorkOrder[]
   invoices        Invoice[]
   paymentMethods  ClientPaymentMethod[]
+  clientAssets    ClientAsset[]
 
   @@index([organizationId])
   @@index([organizationId, lastName, firstName])
@@ -329,6 +349,8 @@ model WorkOrder {
   scheduledRemovalDate  DateTime?
   completedAt           DateTime?
   cancelledAt   DateTime?
+  /// Set when a staff member archives the order; hides it from normal views.
+  archivedAt    DateTime?
   /// Internal-only notes from dispatcher (not visible on client portal).
   internalNotes String?
 
@@ -352,6 +374,7 @@ model WorkOrder {
   inventoryTransactions InventoryTransaction[]
   invoices              Invoice[]
   tasks                 Task[]
+  clientAssets          ClientAsset[]
 
   // ── Indexes ──────────────────────────────────────────────────────────────
   // These indexes support filtering and sorting within a tenant.
@@ -713,4 +736,43 @@ model Task {
   @@index([assignedToId])
   @@index([assignedToId, status])
   @@index([workOrderId, status])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CLIENT ASSET  —  client-owned branded items stored or deployed by org
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// A branded sign panel, rider, info box, or yard sign owned by a Client.
+/// Tracked separately from org inventory; location follows the asset.
+model ClientAsset {
+  id             String        @id @default(cuid())
+  organizationId String
+  clientId       String
+  category       AssetCategory
+  /// Human-readable label, e.g. "Re/Max 18×24 Sign Panel"
+  name           String
+  description    String?
+  quantity       Int           @default(1)
+
+  // ── Current location — all optional; none = at org storage ───────────────
+  /// Deployed at this work order's property address.
+  locationWorkOrderId String?
+  /// Stored with this technician (name shown; no address disclosed).
+  locationUserId      String?
+  /// Free-form fallback label (e.g. "Org warehouse", "Back of truck").
+  locationLabel       String?
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client            Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  locationWorkOrder WorkOrder?   @relation(fields: [locationWorkOrderId], references: [id])
+  locationUser      User?        @relation("AssetStoredWithTech", fields: [locationUserId], references: [id])
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([locationWorkOrderId])
+  @@index([locationUserId])
 }

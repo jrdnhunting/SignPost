@@ -103,6 +103,7 @@ function PanelContent({ data, orgSlug, onCompleted }: { data: TaskPanelData; org
           task={task}
           workOrder={wo}
           client={client}
+          technicians={data.orgStaff}
           orgSlug={orgSlug}
           onCompleted={onCompleted}
         />

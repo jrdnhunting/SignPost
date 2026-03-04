@@ -18,14 +18,15 @@ export default async function DashboardPage({
 
   const [totalOrders, pendingOrders, activeOrders, clients, invoices] =
     await Promise.all([
-      prisma.workOrder.count({ where: { organizationId: org.id } }),
+      prisma.workOrder.count({ where: { organizationId: org.id, archivedAt: null } }),
       prisma.workOrder.count({
-        where: { organizationId: org.id, status: "PENDING" },
+        where: { organizationId: org.id, status: "PENDING", archivedAt: null },
       }),
       prisma.workOrder.count({
         where: {
           organizationId: org.id,
           status: { in: ["CONFIRMED", "PENDING_INSTALLATION", "INSTALLED", "PENDING_REMOVAL"] },
+          archivedAt: null,
         },
       }),
       prisma.client.count({ where: { organizationId: org.id } }),
@@ -36,7 +37,7 @@ export default async function DashboardPage({
 
   const [recentOrders, myTasks] = await Promise.all([
     prisma.workOrder.findMany({
-      where: { organizationId: org.id },
+      where: { organizationId: org.id, archivedAt: null },
       include: { client: true },
       orderBy: { createdAt: "desc" },
       take: 5,

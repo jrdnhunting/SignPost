@@ -76,12 +76,6 @@ export default async function EditWorkOrderPage({
             listingGoLiveDate: wo.listingGoLiveDate
               ? wo.listingGoLiveDate.toISOString().split("T")[0]
               : undefined,
-            scheduledDate: wo.scheduledDate
-              ? wo.scheduledDate.toISOString().split("T")[0]
-              : undefined,
-            scheduledRemovalDate: wo.scheduledRemovalDate
-              ? wo.scheduledRemovalDate.toISOString().split("T")[0]
-              : undefined,
             internalNotes: wo.internalNotes ?? undefined,
             serviceAreaId: wo.serviceAreaId ?? null,
             serviceAreaFee: wo.serviceAreaFee ? String(wo.serviceAreaFee) : null,

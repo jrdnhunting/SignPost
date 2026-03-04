@@ -29,6 +29,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           id: user.id,
           email: user.email,
           name: user.name,
+          isSuperAdmin: user.isSuperAdmin,
           type: "staff" as const,
         }
       },
@@ -69,6 +70,7 @@ declare module "next-auth" {
       type: string
       userId: string
       clientId?: string
+      isSuperAdmin?: boolean
       name?: string | null
       email?: string | null
       image?: string | null

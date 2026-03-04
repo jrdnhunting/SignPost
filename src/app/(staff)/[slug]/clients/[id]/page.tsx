@@ -28,7 +28,7 @@ export default async function ClientDetailPage({
     include: {
       clientUsers: true,
       paymentMethods: { orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }] },
-      workOrders: { orderBy: { createdAt: "desc" }, take: 20 },
+      workOrders: { where: { archivedAt: null }, orderBy: { createdAt: "desc" }, take: 20 },
     },
   })
   if (!client) notFound()

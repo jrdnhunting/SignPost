@@ -4,17 +4,28 @@ import { completeTaskWithData } from "@/actions/tasks"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { formatAddress, formatClientName, formatDate } from "@/lib/utils"
 
 interface UtilityMarkingPanelProps {
   task: { id: string; status: string; completedAt: Date | null; completionData: Record<string, unknown> | null }
-  workOrder: { orderId: number; addressLine1: string; addressLine2: string | null; city: string; state: string; postalCode: string }
+  workOrder: { orderId: number; addressLine1: string; addressLine2: string | null; city: string; state: string; postalCode: string; serviceArea: { name: string } | null }
   client: { firstName: string; lastName: string; companyName: string | null }
+  technicians: { id: string; name: string | null; inServiceArea: boolean }[]
   orgSlug: string
   onCompleted: () => void
 }
 
-export function UtilityMarkingPanel({ task, workOrder, client, orgSlug, onCompleted }: UtilityMarkingPanelProps) {
+export function UtilityMarkingPanel({ task, workOrder, client, technicians, orgSlug, onCompleted }: UtilityMarkingPanelProps) {
   const [isPending, startTransition] = useTransition()
   const [error, setError] = useState("")
 
@@ -23,8 +34,11 @@ export function UtilityMarkingPanel({ task, workOrder, client, orgSlug, onComple
   const [referenceNumber, setReferenceNumber] = useState(saved.referenceNumber ?? "")
   const [estimatedCompletionDate, setEstimatedCompletionDate] = useState(saved.estimatedCompletionDate ?? "")
   const [scheduledInstallDate, setScheduledInstallDate] = useState(saved.scheduledInstallDate ?? "")
+  const [assignedTechnicianId, setAssignedTechnicianId] = useState(saved.assignedTechnicianId ?? "")
 
   const isCompleted = task.status === "COMPLETED"
+
+  const savedTech = technicians.find((t) => t.id === saved.assignedTechnicianId)
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -33,7 +47,13 @@ export function UtilityMarkingPanel({ task, workOrder, client, orgSlug, onComple
       try {
         await completeTaskWithData(
           task.id,
-          { submissionDateTime, referenceNumber, estimatedCompletionDate: estimatedCompletionDate || undefined, scheduledInstallDate },
+          {
+            submissionDateTime,
+            referenceNumber,
+            estimatedCompletionDate: estimatedCompletionDate || undefined,
+            scheduledInstallDate,
+            assignedTechnicianId,
+          },
           orgSlug
         )
         onCompleted()
@@ -64,7 +84,9 @@ export function UtilityMarkingPanel({ task, workOrder, client, orgSlug, onComple
           <Row label="Reference Number" value={saved.referenceNumber ?? "—"} />
           <Row label="Estimated Completion" value={saved.estimatedCompletionDate ? formatDate(new Date(saved.estimatedCompletionDate)) : "—"} />
           <Row label="Scheduled Install Date" value={saved.scheduledInstallDate ? formatDate(new Date(saved.scheduledInstallDate)) : "—"} />
+          <Row label="Assigned Technician" value={savedTech?.name ?? saved.assignedTechnicianId ?? "—"} />
           <p className="text-green-600 text-center pt-2">Completed {task.completedAt ? formatDate(task.completedAt) : ""}</p>
+          <p className="text-xs text-gray-400 text-center">Installation task has been created and assigned.</p>
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -103,8 +125,63 @@ export function UtilityMarkingPanel({ task, workOrder, client, orgSlug, onComple
               required
             />
           </div>
+          <div className="space-y-1">
+            <Label>Assign Technician *</Label>
+            <Select value={assignedTechnicianId} onValueChange={setAssignedTechnicianId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a technician…" />
+              </SelectTrigger>
+              <SelectContent>
+                {(() => {
+                  const inArea = technicians.filter((t) => t.inServiceArea)
+                  const others = technicians.filter((t) => !t.inServiceArea)
+                  const hasServiceArea = workOrder.serviceArea !== null
+
+                  if (!hasServiceArea || inArea.length === 0) {
+                    // No grouping — flat list
+                    return technicians.map((tech) => (
+                      <SelectItem key={tech.id} value={tech.id}>
+                        {tech.name ?? tech.id}
+                      </SelectItem>
+                    ))
+                  }
+
+                  return (
+                    <>
+                      <SelectGroup>
+                        <SelectLabel className="text-xs text-green-700">
+                          Assigned to {workOrder.serviceArea!.name}
+                        </SelectLabel>
+                        {inArea.map((tech) => (
+                          <SelectItem key={tech.id} value={tech.id}>
+                            {tech.name ?? tech.id}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                      {others.length > 0 && (
+                        <>
+                          <SelectSeparator />
+                          <SelectGroup>
+                            <SelectLabel className="text-xs text-gray-500">Other Staff</SelectLabel>
+                            {others.map((tech) => (
+                              <SelectItem key={tech.id} value={tech.id}>
+                                {tech.name ?? tech.id}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </>
+                      )}
+                    </>
+                  )
+                })()}
+              </SelectContent>
+            </Select>
+            {technicians.length === 0 && (
+              <p className="text-xs text-amber-600">No staff members found. Add staff in settings first.</p>
+            )}
+          </div>
           {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md p-2">{error}</p>}
-          <Button type="submit" className="w-full" disabled={isPending}>
+          <Button type="submit" className="w-full" disabled={isPending || !assignedTechnicianId}>
             {isPending ? "Saving…" : "Complete Utility Marking"}
           </Button>
         </form>

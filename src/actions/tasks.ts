@@ -202,11 +202,57 @@ export async function getTaskPanelData(taskId: string) {
         include: {
           client: true,
           invoices: { orderBy: { createdAt: "desc" }, take: 5 },
+          serviceArea: { select: { name: true } },
         },
       },
     },
   })
-  return task
+
+  // Fetch org staff for technician assignment (used by utility marking panel)
+  let orgStaff: { id: string; name: string | null; inServiceArea: boolean }[] = []
+  if (task.workOrder?.organizationId) {
+    const memberships = await prisma.membership.findMany({
+      where: { organizationId: task.workOrder.organizationId },
+      select: { userId: true, user: { select: { id: true, name: true } } },
+    })
+    const seen = new Set<string>()
+    const uniqueUsers = memberships
+      .filter((m) => { const ok = !seen.has(m.userId); seen.add(m.userId); return ok })
+      .map((m) => m.user)
+
+    // Determine which users are assigned to this order's service area
+    let serviceAreaUserIds = new Set<string>()
+    if (task.workOrder.serviceAreaId) {
+      const saTechs = await prisma.serviceAreaTechnician.findMany({
+        where: { serviceAreaId: task.workOrder.serviceAreaId },
+        select: { userId: true },
+      })
+      serviceAreaUserIds = new Set(saTechs.map((t) => t.userId))
+    }
+
+    orgStaff = uniqueUsers
+      .map((u) => ({ ...u, inServiceArea: serviceAreaUserIds.has(u.id) }))
+      .sort((a, b) => (b.inServiceArea ? 1 : 0) - (a.inServiceArea ? 1 : 0))
+  }
+
+  // Serialize Decimal fields so they can cross the server-action boundary
+  const serializedWorkOrder = task.workOrder
+    ? {
+        ...task.workOrder,
+        serviceAreaFee: task.workOrder.serviceAreaFee != null
+          ? String(task.workOrder.serviceAreaFee)
+          : null,
+        invoices: task.workOrder.invoices.map((inv) => ({
+          ...inv,
+          subtotal: String(inv.subtotal),
+          taxAmount: String(inv.taxAmount),
+          discountAmount: String(inv.discountAmount),
+          total: String(inv.total),
+        })),
+      }
+    : null
+
+  return { ...task, workOrder: serializedWorkOrder, orgStaff }
 }
 
 // derivePaymentStatus moved to @/lib/utils to avoid "must be async" rule in server action files
@@ -220,8 +266,10 @@ export async function completeTaskWithData(
 ) {
   const task = await prisma.task.findUniqueOrThrow({
     where: { id: taskId },
-    include: { workOrder: true },
+    include: { workOrder: { select: { ownerId: true } } },
   })
+
+  const wasAlreadyCompleted = task.status === "COMPLETED"
 
   // Per-type required field validation
   const missingFields = validateCompletionData(task.taskType as string, completionData)
@@ -244,18 +292,49 @@ export async function completeTaskWithData(
     })
   }
 
-  const updated = await prisma.task.update({
+  await prisma.task.update({
     where: { id: taskId },
     data: updateData as any,
-    include: { workOrder: true },
   })
 
   // Drive status transitions
-  if (updated.workOrder) {
+  if (task.workOrderId) {
     await applyStatusTransition(
-      { taskType: task.taskType as string, workOrderId: task.workOrderId! },
+      { taskType: task.taskType as string, workOrderId: task.workOrderId },
       completionData.scheduledInstallDate as string | undefined
     )
+  }
+
+  // Save completion photos to the Photo table (first completion only, to avoid duplicates)
+  if (!wasAlreadyCompleted && task.workOrderId) {
+    const uploadedById = task.assignedToId ?? task.workOrder?.ownerId ?? null
+    if (uploadedById) {
+      await saveTaskPhotos(task.workOrderId, uploadedById, task.taskType as string, completionData)
+    }
+  }
+
+  // UTILITY_MARKING completion → auto-create INSTALLATION task and assign technician
+  if (task.taskType === "UTILITY_MARKING" && task.workOrderId) {
+    const techId = completionData.assignedTechnicianId as string | undefined
+    await prisma.$transaction(async (tx) => {
+      const taskNumber = await nextTaskNumber(tx, task.workOrderId!)
+      await tx.task.create({
+        data: {
+          workOrderId: task.workOrderId!,
+          taskType: "INSTALLATION",
+          taskNumber,
+          status: "PENDING",
+          assignedToId: techId ?? null,
+        },
+      })
+      if (techId) {
+        await tx.assignment.upsert({
+          where: { workOrderId_userId: { workOrderId: task.workOrderId!, userId: techId } },
+          create: { workOrderId: task.workOrderId!, userId: techId },
+          update: {},
+        })
+      }
+    })
   }
 
   const slug = orgSlug
@@ -266,7 +345,58 @@ export async function completeTaskWithData(
   revalidatePath(`/${slug}/tasks`)
   revalidatePath(`/${slug}/dashboard`)
 
-  return updated
+  return null
+}
+
+// ── Save task completion photos to the Photo table ─────────────────────────
+
+async function saveTaskPhotos(
+  workOrderId: string,
+  uploadedById: string,
+  taskType: string,
+  data: Record<string, unknown>
+) {
+  type PhotoCtx = "BEFORE" | "DURING" | "AFTER" | "ISSUE"
+  const entries: { url: string; caption: string; context: PhotoCtx }[] = []
+
+  if (taskType === "INSTALLATION") {
+    if (data.sitePhotoUrl) {
+      entries.push({ url: data.sitePhotoUrl as string, caption: "Installation – Site Photo", context: "AFTER" })
+    }
+    if (data.signPanelPhotoUrl) {
+      entries.push({ url: data.signPanelPhotoUrl as string, caption: "Installation – Sign Panel Photo", context: "AFTER" })
+    }
+    const riderUrls = (data.riderPhotoUrls as string[] | undefined) ?? []
+    riderUrls.forEach((url, i) => {
+      const label = riderUrls.length > 1 ? `Installation – Rider Photo ${i + 1}` : "Installation – Rider Photo"
+      entries.push({ url, caption: label, context: "AFTER" })
+    })
+  }
+
+  if (taskType === "REMOVAL") {
+    if (data.preRemovalPhotoUrl) {
+      entries.push({ url: data.preRemovalPhotoUrl as string, caption: "Removal – Pre-Removal Photo", context: "BEFORE" })
+    }
+  }
+
+  if (taskType === "SERVICE") {
+    if (data.completionPhotoUrl) {
+      entries.push({ url: data.completionPhotoUrl as string, caption: "Service – Completion Photo", context: "AFTER" })
+    }
+  }
+
+  if (entries.length === 0) return
+
+  await prisma.photo.createMany({
+    data: entries.map((e) => ({
+      workOrderId,
+      uploadedById,
+      url: e.url,
+      caption: e.caption,
+      context: e.context,
+    })),
+    skipDuplicates: true,
+  })
 }
 
 function validateCompletionData(
@@ -279,6 +409,7 @@ function validateCompletionData(
     if (!data.submissionDateTime) missing.push("Submission date/time")
     if (!data.referenceNumber) missing.push("Reference number")
     if (!data.scheduledInstallDate) missing.push("Scheduled install date")
+    if (!data.assignedTechnicianId) missing.push("Assigned technician")
   }
 
   if (taskType === "INSTALLATION") {

@@ -26,10 +26,23 @@ export default function PortalNav({ clientName, userName, clientId }: PortalNavP
         <span className="text-lg font-bold tracking-tight text-gray-900">SignPost</span>
       </div>
 
-      {/* Client name */}
-      <div className="hidden sm:block">
+      {/* Nav links */}
+      <nav className="hidden sm:flex items-center gap-1">
+        <Link
+          href={`/portal/${clientId}/orders`}
+          className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 rounded-md hover:bg-gray-100 transition-colors"
+        >
+          Orders
+        </Link>
+        <Link
+          href={`/portal/${clientId}/assets`}
+          className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 rounded-md hover:bg-gray-100 transition-colors"
+        >
+          Assets
+        </Link>
+        <span className="text-sm font-medium text-gray-400 px-2">|</span>
         <span className="text-sm font-medium text-gray-600">{clientName}</span>
-      </div>
+      </nav>
 
       {/* User + sign out */}
       <div className="flex items-center gap-3">

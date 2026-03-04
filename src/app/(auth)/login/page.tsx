@@ -96,6 +96,10 @@ export default function LoginPage() {
               Access your portal
             </a>
           </p>
+          <p className="mt-2 text-center text-sm text-gray-500">
+            New to SignPost?{" "}
+            <a href="/signup" className="text-blue-600 hover:underline">Create an account</a>
+          </p>
         </div>
       </div>
     </div>

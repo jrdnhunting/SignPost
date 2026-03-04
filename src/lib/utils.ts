@@ -62,6 +62,16 @@ export function formatDateTime(date: Date | string | null | undefined): string {
   }).format(d)
 }
 
+export function formatAssetCategory(cat: string): string {
+  const labels: Record<string, string> = {
+    SIGN_PANEL: "Sign Panel",
+    SIGN_RIDER: "Sign Rider",
+    INFO_BOX:   "Info Box",
+    YARD_SIGN:  "Yard Sign",
+  }
+  return labels[cat] ?? cat
+}
+
 /** Derive a payment status label from a work order's invoices. */
 export function derivePaymentStatus(invoices: { status: string }[]): string {
   if (!invoices.length) return "No Invoice"

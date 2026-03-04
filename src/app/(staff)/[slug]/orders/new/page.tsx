@@ -31,6 +31,12 @@ export default async function NewOrderPage({
     pricingAdjustment: a.pricingAdjustment ? String(a.pricingAdjustment) : null,
   }))
 
+  const catalogItems = await prisma.inventoryItemType.findMany({
+    where: { organizationId: org.id },
+    select: { id: true, name: true, description: true },
+    orderBy: { name: "asc" },
+  })
+
   return (
     <div className="p-8 max-w-3xl">
       <h1 className="text-2xl font-bold text-gray-900 mb-6">New Order</h1>
@@ -40,6 +46,7 @@ export default async function NewOrderPage({
           organizationId={org.id}
           clients={clients}
           serviceAreas={serviceAreas}
+          catalogItems={catalogItems}
         />
       </div>
     </div>

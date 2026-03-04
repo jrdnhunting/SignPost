@@ -17,6 +17,9 @@ export const authConfig: NextAuthConfig = {
         if ((user as { clientId?: string }).clientId) {
           token.clientId = (user as { clientId: string }).clientId
         }
+        if ((user as { isSuperAdmin?: boolean }).isSuperAdmin) {
+          token.isSuperAdmin = true
+        }
       }
       return token
     },
@@ -25,6 +28,9 @@ export const authConfig: NextAuthConfig = {
       session.user.userId = token.userId as string
       if (token.clientId) {
         session.user.clientId = token.clientId as string
+      }
+      if (token.isSuperAdmin) {
+        session.user.isSuperAdmin = token.isSuperAdmin as boolean
       }
       return session
     },

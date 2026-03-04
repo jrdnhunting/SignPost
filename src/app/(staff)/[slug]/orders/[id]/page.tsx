@@ -14,6 +14,7 @@ import { AssignTechForm } from "./assign-tech-form"
 import { CreateInvoiceButton } from "./create-invoice-button"
 import { TaskList } from "./task-list"
 import { RemovalRequestDialog } from "./removal-request-dialog"
+import { ArchiveButton } from "./archive-button"
 
 export default async function OrderDetailPage({
   params,
@@ -93,12 +94,24 @@ export default async function OrderDetailPage({
             <p className="text-gray-500 mt-1">{wo.client.firstName} {wo.client.lastName}{wo.client.companyName ? ` · ${wo.client.companyName}` : ""}</p>
           </div>
           <div className="flex items-center gap-2">
-            {wo.status === "INSTALLED" && (
+            {wo.archivedAt && (
+              <span className="text-xs font-medium text-amber-700 bg-amber-100 border border-amber-300 rounded px-2 py-1">
+                Archived
+              </span>
+            )}
+            {wo.status === "INSTALLED" && !wo.archivedAt && (
               <RemovalRequestDialog workOrderId={wo.id} />
             )}
-            <Button variant="outline" asChild>
-              <Link href={`/${slug}/orders/${id}/edit`}>Edit</Link>
-            </Button>
+            {!wo.archivedAt && (
+              <Button variant="outline" asChild>
+                <Link href={`/${slug}/orders/${id}/edit`}>Edit</Link>
+              </Button>
+            )}
+            <ArchiveButton
+              workOrderId={wo.id}
+              orgSlug={slug}
+              isArchived={!!wo.archivedAt}
+            />
           </div>
         </div>
       </div>

@@ -12,7 +12,7 @@ import {
   Settings,
   LogOut,
   CheckSquare,
-  UserCircle,
+  ShieldAlert,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -21,6 +21,7 @@ interface SidebarProps {
   orgSlug: string
   userName: string
   userEmail: string
+  isSuperAdmin?: boolean
 }
 
 interface NavLink {
@@ -29,7 +30,7 @@ interface NavLink {
   icon: React.ComponentType<{ className?: string }>
 }
 
-export default function Sidebar({ orgSlug, userName, userEmail }: SidebarProps) {
+export default function Sidebar({ orgSlug, userName, userEmail, isSuperAdmin }: SidebarProps) {
   const pathname = usePathname()
 
   const navLinks: NavLink[] = [
@@ -88,6 +89,23 @@ export default function Sidebar({ orgSlug, userName, userEmail }: SidebarProps) 
             </li>
           ))}
         </ul>
+
+        {isSuperAdmin && (
+          <div className="mt-4 border-t border-gray-800 pt-4">
+            <Link
+              href="/superadmin"
+              className={cn(
+                "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                pathname.startsWith("/superadmin")
+                  ? "bg-amber-600 text-white"
+                  : "text-amber-400 hover:bg-amber-900/40 hover:text-amber-300"
+              )}
+            >
+              <ShieldAlert className="h-4 w-4 shrink-0" />
+              Super Admin Console
+            </Link>
+          </div>
+        )}
       </nav>
 
       {/* User footer */}

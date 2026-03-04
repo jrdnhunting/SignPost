@@ -28,6 +28,7 @@ export default async function TasksPage({
       where: {
         organizationId: org.id,
         status: { notIn: ["COMPLETED", "CANCELLED"] },
+        archivedAt: null,
       },
       include: { client: true },
       orderBy: { orderId: "desc" },
@@ -42,7 +43,7 @@ export default async function TasksPage({
 
   const tasks = await prisma.task.findMany({
     where: {
-      workOrder: { organizationId: org.id },
+      workOrder: { organizationId: org.id, archivedAt: null },
       ...(status ? { status: status as any } : { status: { in: ["PENDING", "IN_PROGRESS"] } }),
       ...(showMineOnly && session?.user ? { assignedToId: session.user.userId } : {}),
     },

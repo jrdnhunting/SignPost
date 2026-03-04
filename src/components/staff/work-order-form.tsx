@@ -46,8 +46,6 @@ const schema = z.object({
   country: z.string().default("US"),
   locationNotes: z.string().optional(),
   priority: z.enum(["LOW", "NORMAL", "HIGH", "URGENT"]).default("NORMAL"),
-  scheduledDate: z.string().optional(),
-  scheduledRemovalDate: z.string().optional(),
   listingGoLiveDate: z.string().optional(),
   internalNotes: z.string().optional(),
   serviceAreaId: z.string().optional().nullable(),
@@ -56,6 +54,13 @@ const schema = z.object({
 
 type WorkOrderFormData = z.infer<typeof schema>
 
+type OrderItem = {
+  key: string
+  description: string
+  quantity: number
+  unitPrice: string
+}
+
 interface WorkOrderFormProps {
   orgSlug: string
   organizationId: string
@@ -63,6 +68,7 @@ interface WorkOrderFormProps {
   defaultValues?: Partial<WorkOrderFormData>
   workOrderId?: string
   serviceAreas?: SerializedServiceArea[]
+  catalogItems?: { id: string; name: string; description: string | null }[]
 }
 
 export default function WorkOrderForm({
@@ -72,6 +78,7 @@ export default function WorkOrderForm({
   defaultValues,
   workOrderId,
   serviceAreas = [],
+  catalogItems = [],
 }: WorkOrderFormProps) {
   const [isPending, startTransition] = useTransition()
   const isEditing = Boolean(workOrderId)
@@ -88,6 +95,9 @@ export default function WorkOrderForm({
   const [zoneStatus, setZoneStatus] = useState<ZoneStatus>(null)
   const [overrideOutOfArea, setOverrideOutOfArea] = useState(false)
   const [geoPoint, setGeoPoint] = useState<{ lat: number; lng: number } | null>(null)
+
+  // Order items (new orders only)
+  const [orderItems, setOrderItems] = useState<OrderItem[]>([])
 
   const {
     register,
@@ -184,6 +194,37 @@ export default function WorkOrderForm({
     setIsCreatingClient(false)
   }
 
+  // ── Product item helpers ──────────────────────────────────────────────────
+
+  function addCatalogItem(catalogItem: { id: string; name: string; description: string | null }) {
+    setOrderItems((prev) => [
+      ...prev,
+      { key: crypto.randomUUID(), description: catalogItem.name, quantity: 1, unitPrice: "" },
+    ])
+  }
+
+  function addBlankItem() {
+    setOrderItems((prev) => [
+      ...prev,
+      { key: crypto.randomUUID(), description: "", quantity: 1, unitPrice: "" },
+    ])
+  }
+
+  function updateItem(key: string, field: keyof Omit<OrderItem, "key">, value: string | number) {
+    setOrderItems((prev) =>
+      prev.map((item) => (item.key === key ? { ...item, [field]: value } : item))
+    )
+  }
+
+  function removeItem(key: string) {
+    setOrderItems((prev) => prev.filter((item) => item.key !== key))
+  }
+
+  const orderTotal = orderItems.reduce((sum, item) => {
+    const price = parseFloat(item.unitPrice) || 0
+    return sum + item.quantity * price
+  }, 0)
+
   function onSubmit(data: WorkOrderFormData) {
     startTransition(async () => {
       let finalServiceAreaId: string | null = null
@@ -224,7 +265,14 @@ export default function WorkOrderForm({
       if (isEditing && workOrderId) {
         await updateWorkOrder(workOrderId, payload, orgSlug)
       } else {
-        await createWorkOrder(payload, orgSlug)
+        const items = orderItems
+          .filter((i) => i.description.trim())
+          .map((i) => ({
+            description: i.description.trim(),
+            quantity: Math.max(1, i.quantity),
+            unitPrice: parseFloat(i.unitPrice) || 0,
+          }))
+        await createWorkOrder(payload, orgSlug, items)
       }
     })
   }
@@ -404,17 +452,129 @@ export default function WorkOrderForm({
         <Input id="listingGoLiveDate" type="date" {...register("listingGoLiveDate")} />
       </div>
 
-      {/* Scheduled Install Date */}
-      <div className="space-y-2">
-        <Label htmlFor="scheduledDate">Scheduled Install Date</Label>
-        <Input id="scheduledDate" type="date" {...register("scheduledDate")} />
-      </div>
+      {/* Products — new orders only */}
+      {!isEditing && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-foreground">Products</h3>
+            <span className="text-xs text-gray-500">Items to be installed</span>
+          </div>
 
-      {/* Scheduled Removal Date */}
-      <div className="space-y-2">
-        <Label htmlFor="scheduledRemovalDate">Scheduled Removal Date</Label>
-        <Input id="scheduledRemovalDate" type="date" {...register("scheduledRemovalDate")} />
-      </div>
+          {/* Add product controls */}
+          <div className="flex gap-2">
+            {catalogItems.length > 0 && (
+              <Select
+                value=""
+                onValueChange={(val) => {
+                  const item = catalogItems.find((c) => c.id === val)
+                  if (item) addCatalogItem(item)
+                }}
+              >
+                <SelectTrigger className="flex-1 text-sm">
+                  <SelectValue placeholder="Add from catalog…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {catalogItems.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Button type="button" variant="outline" size="sm" onClick={addBlankItem}>
+              + Custom item
+            </Button>
+          </div>
+
+          {/* Item rows */}
+          {orderItems.length > 0 && (
+            <div className="border rounded-md overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">Description</th>
+                    <th className="px-3 py-2 text-center font-medium text-gray-600 w-20">Qty</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600 w-28">Unit Price</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600 w-24">Total</th>
+                    <th className="w-8" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {orderItems.map((item) => {
+                    const lineTotal = item.quantity * (parseFloat(item.unitPrice) || 0)
+                    return (
+                      <tr key={item.key} className="bg-white">
+                        <td className="px-3 py-2">
+                          <input
+                            type="text"
+                            value={item.description}
+                            onChange={(e) => updateItem(item.key, "description", e.target.value)}
+                            placeholder="Item description"
+                            className="w-full bg-transparent focus:outline-none placeholder-gray-400"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            min={1}
+                            value={item.quantity}
+                            onChange={(e) => updateItem(item.key, "quantity", parseInt(e.target.value) || 1)}
+                            className="w-full text-center bg-transparent focus:outline-none"
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center justify-end gap-1">
+                            <span className="text-gray-400">$</span>
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={item.unitPrice}
+                              onChange={(e) => updateItem(item.key, "unitPrice", e.target.value)}
+                              placeholder="0.00"
+                              className="w-20 text-right bg-transparent focus:outline-none placeholder-gray-400"
+                            />
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 text-right text-gray-700">
+                          ${lineTotal.toFixed(2)}
+                        </td>
+                        <td className="px-2 py-2">
+                          <button
+                            type="button"
+                            onClick={() => removeItem(item.key)}
+                            className="text-gray-300 hover:text-red-500 transition-colors"
+                          >
+                            ×
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+                <tfoot className="bg-gray-50 border-t">
+                  <tr>
+                    <td colSpan={3} className="px-3 py-2 text-right text-sm font-medium text-gray-600">
+                      Total
+                    </td>
+                    <td className="px-3 py-2 text-right text-sm font-semibold text-gray-900">
+                      ${orderTotal.toFixed(2)}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+
+          {orderItems.length === 0 && (
+            <p className="text-xs text-gray-400 text-center py-3 border border-dashed rounded-md">
+              No products added yet
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Internal Notes */}
       <div className="space-y-2">

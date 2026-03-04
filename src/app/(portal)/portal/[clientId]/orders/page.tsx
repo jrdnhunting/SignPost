@@ -14,7 +14,7 @@ export default async function PortalOrdersPage({
   const { clientId } = await params
 
   const workOrders = await prisma.workOrder.findMany({
-    where: { clientId },
+    where: { clientId, archivedAt: null },
     orderBy: { createdAt: "desc" },
   })
 

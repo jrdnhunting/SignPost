@@ -3,7 +3,9 @@ export const dynamic = "force-dynamic"
 import { auth } from "@/lib/auth"
 import { prisma } from "@/lib/prisma"
 import { redirect } from "next/navigation"
+import { cookies } from "next/headers"
 import PortalNav from "@/components/portal/portal-nav"
+import MasqueradeBanner from "@/components/portal/masquerade-banner"
 
 export default async function PortalLayout({
   children,
@@ -15,18 +17,44 @@ export default async function PortalLayout({
   const { clientId } = await params
   const session = await auth()
 
-  if (!session?.user || session.user.type !== "client" || session.user.clientId !== clientId) {
-    redirect("/portal/login")
+  const cookieStore = await cookies()
+  const masqRaw = cookieStore.get("signpost-masquerade")?.value
+  let masq: { clientId: string; clientName: string; returnOrgId: string } | null = null
+  if (masqRaw) {
+    try {
+      masq = JSON.parse(masqRaw)
+    } catch {
+      // ignore invalid cookie
+    }
+  }
+
+  const isSuperAdminMasq =
+    session?.user?.isSuperAdmin === true && masq?.clientId === clientId
+
+  if (!isSuperAdminMasq) {
+    if (!session?.user || session.user.type !== "client" || session.user.clientId !== clientId) {
+      redirect("/portal/login")
+    }
   }
 
   const client = await prisma.client.findUnique({ where: { id: clientId } })
   if (!client) redirect("/portal/login")
 
+  const displayName = isSuperAdminMasq
+    ? masq!.clientName
+    : (session!.user.name ?? "")
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {isSuperAdminMasq && masq && (
+        <MasqueradeBanner
+          clientName={masq.clientName}
+          returnOrgId={masq.returnOrgId}
+        />
+      )}
       <PortalNav
         clientName={client.companyName ?? `${client.firstName} ${client.lastName}`}
-        userName={session.user.name ?? ""}
+        userName={displayName}
         clientId={clientId}
       />
       <main className="max-w-4xl mx-auto px-4 py-8">{children}</main>
