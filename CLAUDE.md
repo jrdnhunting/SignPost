@@ -32,12 +32,12 @@ Multi-tenant sign installation SaaS (Prisma + PostgreSQL).
 - Lifecycle tracking is by `WorkOrder.id` only.
 
 ## Models summary
-- Organization (tenant root, has `slug @unique`; now has phone/contactEmail/address/outOfServiceAreaMessage fields)
+- Organization (tenant root, has `slug @unique`; fields: phone/contactEmail/address/outOfServiceAreaMessage/websiteUrl)
 - User (staff: Admin/Dispatcher/Technician — separate from client portal users)
 - Membership (User ↔ Organization, roles: ADMIN/DISPATCHER/TECHNICIAN/CLIENT, @@unique([org, user, role]) — one row per role, user can have multiple roles)
 - Client (customer account scoped to an Org)
 - ClientUser (portal login scoped to a Client, separate auth from User)
-- WorkOrder (address inline + serviceAreaId/serviceAreaFee optional FK to ServiceArea)
+- WorkOrder (address inline + serviceAreaId/serviceAreaFee optional FK to ServiceArea; emailLogs relation)
 - WorkOrderItem (line items, sortOrder field)
 - Assignment (User technician ↔ WorkOrder, @@unique([workOrderId, userId]))
 - WorkLog (clock-in/out, signed startedAt/endedAt nullable)
@@ -50,6 +50,10 @@ Multi-tenant sign installation SaaS (Prisma + PostgreSQL).
 - ServiceArea (GeoJSON polygon zone per org; pricingAdjustment Decimal?)
 - ServiceAreaTechnician (User ↔ ServiceArea join, @@unique([serviceAreaId, userId]))
 - ClientAsset (client-owned branded panels/riders/signs; location: workOrderId OR userId OR locationLabel)
+- CatalogItem (per-org products & services; CatalogItemType enum: MAIN_SERVICE/ADD_ON/PRODUCT/FEE; price Decimal?)
+- EmailTemplate (per-org days-in-ground email automation; triggerDays Int)
+- EmailLog (one per template+workOrder pair; @@unique([emailTemplateId, workOrderId]); status string)
+- QRCode (per-org named redirect codes; code @unique 6-char slug; optional clientId FK → Client)
 
 ## Membership unique key change (migration 20260227240000)
 - Old: @@unique([organizationId, userId]) → one role per user per org
@@ -86,12 +90,17 @@ Multi-tenant sign installation SaaS (Prisma + PostgreSQL).
 - `User.isSuperAdmin Boolean @default(false)` — stored in JWT; readable in edge middleware
 - Super admin bypasses Membership gate in `[slug]/layout.tsx` and can access any org
 - Route group `src/app/(superadmin)/superadmin/` — layout guards `isSuperAdmin`; lists all orgs + per-org staff/client tables
-- Masquerade: `startClientMasquerade()` sets httpOnly cookie `signpost-masquerade = { clientId, clientName, returnOrgId, originalUserId }`
-- Middleware allows portal access when `isSuperAdmin + cookie.clientId === URL clientId`
-- Portal layout reads cookie; renders `MasqueradeBanner` (amber sticky bar) when masquerading
-- `stopMasquerade()` deletes cookie, redirects to `/superadmin/[returnOrgId]`
-- Server actions: `src/actions/masquerade.ts` (startClientMasquerade, stopMasquerade)
-- Components: `src/components/portal/masquerade-banner.tsx`, `src/app/(superadmin)/superadmin/[orgId]/masquerade-button.tsx`
+- **Two masquerade actions** in `src/actions/masquerade.ts`:
+  - `startClientMasquerade(clientId, clientName, returnOrgId)` — superAdmin only; cookie has `returnOrgId`
+  - `startStaffClientMasquerade(clientId, clientName, returnUrl)` — any staff; cookie has `returnUrl`; triggered from client profile "View Client Portal" button
+- Cookie: `signpost-masquerade = { clientId, clientName, returnOrgId?, returnUrl?, originalUserId }`
+- `stopMasquerade()` — reads `returnUrl` first (staff), falls back to `/superadmin/[returnOrgId]` (superAdmin)
+- **Middleware**: any staff with matching masquerade cookie can access portal routes (not just superAdmin)
+- **Portal layout**: `isStaffMasq = session.user.type === "staff" && masq.clientId === clientId` — covers all staff
+- Portal layout reads cookie; renders `MasqueradeBanner` (amber sticky bar); shows "Staff View" or "Super Admin View"
+- Portal pages must NOT add their own auth guard — layout handles it; redundant guards break masquerade
+- **Profile page** (`/portal/[clientId]/profile`): detects masquerade via cookie; when masquerading shows personal info read-only, hides Change Password card; company info and payment methods remain editable
+- Components: `src/components/portal/masquerade-banner.tsx` (props: clientName, isSuperAdmin)
 - Migration: `20260304010000_super_admin` — `ALTER TABLE "User" ADD COLUMN "isSuperAdmin" BOOLEAN NOT NULL DEFAULT false`
 
 ## Archive orders
@@ -111,6 +120,36 @@ Multi-tenant sign installation SaaS (Prisma + PostgreSQL).
 ## Prisma migration pattern (non-interactive environment)
 - `prisma migrate dev` is interactive-only and will error — always use:
   `npx prisma migrate deploy && npx prisma generate`
+
+## Photo compression
+- Upload routes compress all images to ≤1 MB using `sharp` before saving
+- Logic: ≤1 MB → quality 85 (normalize); >1 MB → try quality 80/60/40/20; last resort resize to 1200px wide at quality 50
+- Output always `.jpg` regardless of input format
+- Applied to: `/api/upload/task-photo` and `/api/upload/client-photo`
+
+## Products & Services catalog
+- `CatalogItem` model (migration 20260306100000): per-org, CatalogItemType enum (MAIN_SERVICE/ADD_ON/PRODUCT/FEE), price Decimal?, isActive, sortOrder
+- Staff UI: Settings → "Products & Services" card (`src/components/staff/catalog-items-section.tsx`)
+- Server actions: `src/actions/catalog-items.ts` (createCatalogItem, updateCatalogItem, deleteCatalogItem)
+- New order form: pulls from CatalogItem (active only) instead of InventoryItemType; selecting catalog item auto-fills unitPrice
+- `Organization.websiteUrl String?` added; visible in Company Details settings form
+
+## Email automation
+- `EmailTemplate` + `EmailLog` models (migration 20260306100000)
+- Staff UI: Settings → "Email Automation – Days-In-Ground" card (`src/components/staff/email-automation-section.tsx`)
+- Server actions: `src/actions/email-templates.ts` (createEmailTemplate, updateEmailTemplate, deleteEmailTemplate)
+- Cron endpoint: `GET /api/cron/email-automation` — finds orders past triggerDays threshold, creates EmailLog rows, stubs SMTP; protected by optional `CRON_SECRET` env var
+- Template body variables: `{{client_name}}`, `{{order_id}}`, `{{address}}`, `{{installed_date}}`, `{{org_name}}`
+
+## QR Codes
+- `QRCode` model (migration 20260306100000 + 20260306110000): code @unique 6-char slug, targetUrl, optional clientId FK
+- **Staff page**: `src/app/(staff)/[slug]/qrcodes/page.tsx` — grid/list toggle (default list), create/edit/delete, scope (Global or Client)
+- **List view**: `QRCodeRow` component; **grid view**: `QRCodeCard` component — both support inline edit with scope/client selector
+- **Public redirect**: `GET /src/app/qr/[code]/route.ts` — no auth, 302 redirect to targetUrl; `/qr` in middleware topLevelRoutes
+- **Settings static QRs**: `SettingsQRCodesSection` — two panels (removal form URL + company homepage URL), client-side qrcode generation + PNG download
+- **Portal**: `/portal/[clientId]/qrcodes` — read-only grid of QR codes assigned to that client; "QR Codes" nav link in portal-nav.tsx
+- Sidebar: "QR Codes" nav link (QrCode icon from lucide-react) added after Map
+- Package: `qrcode` + `@types/qrcode`
 
 ## Task panel system
 - Tasks are clickable in both the Tasks page and order detail view — opens a `TaskPanel` dialog
