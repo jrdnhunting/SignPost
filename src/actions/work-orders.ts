@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { revalidatePath } from "next/cache"
 import { z } from "zod"
 import { createInitialTask, getOrgAdminUserId } from "./tasks"
+import { geocodeAddress } from "@/lib/geocode"
 
 const workOrderSchema = z.object({
   organizationId: z.string(),
@@ -76,6 +77,13 @@ export async function createWorkOrder(
     return created
   })
 
+  // Geocode address in background (non-blocking — don't await in the transaction)
+  geocodeAddress(parsed).then((point) => {
+    if (point) {
+      prisma.workOrder.update({ where: { id: wo.id }, data: { lat: point.lat, lng: point.lng } }).catch(() => {})
+    }
+  })
+
   revalidatePath(`/${orgSlug}/orders`)
   return { ...wo, serviceAreaFee: wo.serviceAreaFee ? String(wo.serviceAreaFee) : null }
 }
@@ -90,6 +98,23 @@ export async function updateWorkOrder(id: string, data: Partial<z.infer<typeof w
       listingGoLiveDate: data.listingGoLiveDate ? new Date(data.listingGoLiveDate) : undefined,
     },
   })
+
+  // Re-geocode if any address field changed
+  if (data.addressLine1 || data.city || data.state || data.postalCode) {
+    geocodeAddress({
+      addressLine1: wo.addressLine1,
+      addressLine2: wo.addressLine2,
+      city: wo.city,
+      state: wo.state,
+      postalCode: wo.postalCode,
+      country: wo.country,
+    }).then((point) => {
+      if (point) {
+        prisma.workOrder.update({ where: { id }, data: { lat: point.lat, lng: point.lng } }).catch(() => {})
+      }
+    })
+  }
+
   revalidatePath(`/${orgSlug}/orders`)
   revalidatePath(`/${orgSlug}/orders/${id}`)
   return { ...wo, serviceAreaFee: wo.serviceAreaFee ? String(wo.serviceAreaFee) : null }
@@ -102,6 +127,7 @@ export async function updateWorkOrderStatus(id: string, status: string, orgSlug:
       status: status as any,
       completedAt: status === "COMPLETED" ? new Date() : undefined,
       cancelledAt: status === "CANCELLED" ? new Date() : undefined,
+      installedAt: status === "INSTALLED" ? new Date() : undefined,
     },
   })
   revalidatePath(`/${orgSlug}/orders/${id}`)
@@ -196,6 +222,20 @@ export async function submitPortalOrder(data: {
     await createInitialTask(tx, created.id, "PENDING", ownerId)
 
     return created
+  })
+
+  // Geocode address in background
+  geocodeAddress({
+    addressLine1: data.addressLine1,
+    addressLine2: data.addressLine2,
+    city: data.city,
+    state: data.state,
+    postalCode: data.postalCode,
+    country: data.country,
+  }).then((point) => {
+    if (point) {
+      prisma.workOrder.update({ where: { id: wo.id }, data: { lat: point.lat, lng: point.lng } }).catch(() => {})
+    }
   })
 
   revalidatePath(`/portal/${data.clientId}/orders`)

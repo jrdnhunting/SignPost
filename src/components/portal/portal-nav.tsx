@@ -40,6 +40,12 @@ export default function PortalNav({ clientName, userName, clientId }: PortalNavP
         >
           Assets
         </Link>
+        <Link
+          href={`/portal/${clientId}/qrcodes`}
+          className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 rounded-md hover:bg-gray-100 transition-colors"
+        >
+          QR Codes
+        </Link>
         <span className="text-sm font-medium text-gray-400 px-2">|</span>
         <span className="text-sm font-medium text-gray-600">{clientName}</span>
       </nav>

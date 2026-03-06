@@ -31,11 +31,17 @@ export default async function NewOrderPage({
     pricingAdjustment: a.pricingAdjustment ? String(a.pricingAdjustment) : null,
   }))
 
-  const catalogItems = await prisma.inventoryItemType.findMany({
-    where: { organizationId: org.id },
-    select: { id: true, name: true, description: true },
-    orderBy: { name: "asc" },
+  const rawCatalogItems = await prisma.catalogItem.findMany({
+    where: { organizationId: org.id, isActive: true },
+    select: { id: true, name: true, description: true, price: true },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   })
+  const catalogItems = rawCatalogItems.map((c) => ({
+    id: c.id,
+    name: c.name,
+    description: c.description,
+    price: c.price != null ? String(c.price) : null,
+  }))
 
   return (
     <div className="p-8 max-w-3xl">

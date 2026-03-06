@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useTransition } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,6 +10,8 @@ import { ClientEditForm } from "./client-edit-form"
 import { ClientPhotoUpload } from "./client-photo-upload"
 import { PaymentMethodsCard } from "./payment-methods-card"
 import { AddClientUserForm } from "./add-client-user-form"
+import { startStaffClientMasquerade } from "@/actions/masquerade"
+import { Eye } from "lucide-react"
 
 interface WorkOrder {
   id: string
@@ -64,6 +66,17 @@ export function ClientDetailShell({
   workOrders: WorkOrder[]
 }) {
   const [editing, setEditing] = useState(false)
+  const [isMasqPending, startMasqTransition] = useTransition()
+
+  function handleViewPortal() {
+    startMasqTransition(async () => {
+      await startStaffClientMasquerade(
+        client.id,
+        displayName,
+        `/${orgSlug}/clients/${client.id}`
+      )
+    })
+  }
 
   return (
     <div className="space-y-6">
@@ -84,6 +97,16 @@ export function ClientDetailShell({
               )}
             </div>
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleViewPortal}
+                disabled={isMasqPending}
+                title="View this client's portal"
+              >
+                <Eye className="h-3.5 w-3.5 mr-1.5" />
+                {isMasqPending ? "Opening…" : "View Client Portal"}
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setEditing(!editing)}>
                 {editing ? "Cancel" : "Edit profile"}
               </Button>

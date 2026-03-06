@@ -1,6 +1,7 @@
 "use client"
 
 import { useTransition, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -68,7 +69,7 @@ interface WorkOrderFormProps {
   defaultValues?: Partial<WorkOrderFormData>
   workOrderId?: string
   serviceAreas?: SerializedServiceArea[]
-  catalogItems?: { id: string; name: string; description: string | null }[]
+  catalogItems?: { id: string; name: string; description: string | null; price?: string | null }[]
 }
 
 export default function WorkOrderForm({
@@ -81,6 +82,7 @@ export default function WorkOrderForm({
   catalogItems = [],
 }: WorkOrderFormProps) {
   const [isPending, startTransition] = useTransition()
+  const router = useRouter()
   const isEditing = Boolean(workOrderId)
   const [clientList, setClientList] = useState(clients)
   const [showNewClient, setShowNewClient] = useState(false)
@@ -196,10 +198,10 @@ export default function WorkOrderForm({
 
   // ── Product item helpers ──────────────────────────────────────────────────
 
-  function addCatalogItem(catalogItem: { id: string; name: string; description: string | null }) {
+  function addCatalogItem(catalogItem: { id: string; name: string; description: string | null; price?: string | null }) {
     setOrderItems((prev) => [
       ...prev,
-      { key: crypto.randomUUID(), description: catalogItem.name, quantity: 1, unitPrice: "" },
+      { key: crypto.randomUUID(), description: catalogItem.name, quantity: 1, unitPrice: catalogItem.price ?? "" },
     ])
   }
 
@@ -272,7 +274,9 @@ export default function WorkOrderForm({
             quantity: Math.max(1, i.quantity),
             unitPrice: parseFloat(i.unitPrice) || 0,
           }))
-        await createWorkOrder(payload, orgSlug, items)
+        const created = await createWorkOrder(payload, orgSlug, items)
+        router.push(`/${orgSlug}/orders/${created.id}`)
+        return
       }
     })
   }

@@ -10,6 +10,10 @@ import { WorkOrderPreferencesForm } from "./work-order-preferences-form"
 import { ServiceAreasSection } from "./service-areas-section"
 import { StaffManagementSection } from "./staff-management-section"
 import { RemovalFormSettings } from "./removal-form-settings"
+import { CatalogItemsSection } from "@/components/staff/catalog-items-section"
+import { EmailAutomationSection } from "@/components/staff/email-automation-section"
+import { SettingsQRCodesSection } from "@/components/staff/settings-qr-codes-section"
+import { headers } from "next/headers"
 
 export default async function SettingsPage({
   params,
@@ -26,6 +30,12 @@ export default async function SettingsPage({
         include: {
           technicians: { include: { user: true } },
         },
+        orderBy: { createdAt: "asc" },
+      },
+      catalogItems: {
+        orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      },
+      emailTemplates: {
         orderBy: { createdAt: "asc" },
       },
     },
@@ -61,6 +71,23 @@ export default async function SettingsPage({
   const technicians = staffMembers
     .filter((m) => m.isTechnician)
     .map((m) => ({ id: m.userId, name: m.name }))
+
+  // Get host for building absolute URLs
+  const hdrs = await headers()
+  const host = hdrs.get("host") ?? "localhost:3000"
+  const protocol = host.startsWith("localhost") ? "http" : "https"
+  const baseUrl = `${protocol}://${host}`
+
+  // Serialize catalog items (Decimal → string)
+  const catalogItems = org.catalogItems.map((c) => ({
+    id: c.id,
+    name: c.name,
+    description: c.description,
+    price: c.price != null ? String(c.price) : null,
+    serviceType: c.serviceType as "MAIN_SERVICE" | "ADD_ON" | "PRODUCT" | "FEE",
+    isActive: c.isActive,
+    sortOrder: c.sortOrder,
+  }))
 
   // Serialize service areas (Decimal → string)
   const serviceAreas = org.serviceAreas.map((a) => ({
@@ -138,6 +165,7 @@ export default async function SettingsPage({
                 state: org.state,
                 postalCode: org.postalCode,
                 country: org.country,
+                websiteUrl: org.websiteUrl,
               }}
             />
           </CardContent>
@@ -199,6 +227,48 @@ export default async function SettingsPage({
               orgId={org.id}
               orgSlug={slug}
               initialMembers={staffMembers}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Card 7 — Products & Services */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Products &amp; Services</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <CatalogItemsSection
+              orgId={org.id}
+              orgSlug={slug}
+              initialItems={catalogItems}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Card 8 — Email Automation */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Email Automation – Days-In-Ground</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <EmailAutomationSection
+              orgId={org.id}
+              orgSlug={slug}
+              initialTemplates={org.emailTemplates}
+            />
+          </CardContent>
+        </Card>
+
+        {/* Card 9 — QR Codes */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">QR Codes</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SettingsQRCodesSection
+              orgSlug={slug}
+              websiteUrl={org.websiteUrl}
+              baseUrl={baseUrl}
             />
           </CardContent>
         </Card>

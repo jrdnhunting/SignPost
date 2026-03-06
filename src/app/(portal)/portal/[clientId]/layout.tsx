@@ -28,10 +28,10 @@ export default async function PortalLayout({
     }
   }
 
-  const isSuperAdminMasq =
-    session?.user?.isSuperAdmin === true && masq?.clientId === clientId
+  const isStaffMasq =
+    session?.user?.type === "staff" && masq?.clientId === clientId
 
-  if (!isSuperAdminMasq) {
+  if (!isStaffMasq) {
     if (!session?.user || session.user.type !== "client" || session.user.clientId !== clientId) {
       redirect("/portal/login")
     }
@@ -40,16 +40,16 @@ export default async function PortalLayout({
   const client = await prisma.client.findUnique({ where: { id: clientId } })
   if (!client) redirect("/portal/login")
 
-  const displayName = isSuperAdminMasq
+  const displayName = isStaffMasq
     ? masq!.clientName
     : (session!.user.name ?? "")
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {isSuperAdminMasq && masq && (
+      {isStaffMasq && masq && (
         <MasqueradeBanner
           clientName={masq.clientName}
-          returnOrgId={masq.returnOrgId}
+          isSuperAdmin={session?.user?.isSuperAdmin === true}
         />
       )}
       <PortalNav

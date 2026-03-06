@@ -1,0 +1,4 @@
+ALTER TABLE "QRCode" ADD COLUMN "clientId" TEXT;
+ALTER TABLE "QRCode" ADD CONSTRAINT "QRCode_clientId_fkey"
+  FOREIGN KEY ("clientId") REFERENCES "Client"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+CREATE INDEX "QRCode_clientId_idx" ON "QRCode"("clientId");

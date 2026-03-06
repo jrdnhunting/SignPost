@@ -8,13 +8,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Plus, X } from "lucide-react"
 
 interface ClientProfileFormProps {
-  userId: string
+  userId: string | null
   initialName: string
   initialEmail: string
   clientId: string
   initialCompanyName: string
   initialPhone: string
   initialNotificationEmails: string[]
+  isMasquerade?: boolean
 }
 
 export function ClientProfileForm({
@@ -25,6 +26,7 @@ export function ClientProfileForm({
   initialCompanyName,
   initialPhone,
   initialNotificationEmails,
+  isMasquerade = false,
 }: ClientProfileFormProps) {
   const [isPending, startTransition] = useTransition()
 
@@ -51,7 +53,7 @@ export function ClientProfileForm({
     setProfileMsg(null)
     startTransition(async () => {
       try {
-        await updateClientUserProfile({ userId, name, email }, clientId)
+        await updateClientUserProfile({ userId: userId!, name, email }, clientId)
         setProfileMsg({ type: "success", text: "Profile updated." })
       } catch (err) {
         setProfileMsg({ type: "error", text: err instanceof Error ? err.message : "Failed to save." })
@@ -92,7 +94,7 @@ export function ClientProfileForm({
     }
     startTransition(async () => {
       try {
-        await changeClientUserPassword({ userId, currentPassword, newPassword })
+        await changeClientUserPassword({ userId: userId!, currentPassword, newPassword })
         setPasswordMsg({ type: "success", text: "Password changed." })
         setCurrentPassword("")
         setNewPassword("")
@@ -105,7 +107,30 @@ export function ClientProfileForm({
 
   return (
     <div className="space-y-6">
+      {isMasquerade && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          You are viewing this page as a staff masquerade. Personal login info and password are read-only.
+        </div>
+      )}
+
       {/* Login info */}
+      {isMasquerade ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Personal Information</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div>
+              <p className="text-gray-500 text-xs uppercase mb-0.5">Name</p>
+              <p className="font-medium">{initialName || "—"}</p>
+            </div>
+            <div>
+              <p className="text-gray-500 text-xs uppercase mb-0.5">Email</p>
+              <p className="font-medium">{initialEmail || "—"}</p>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Personal Information</CardTitle>
@@ -142,6 +167,7 @@ export function ClientProfileForm({
           </form>
         </CardContent>
       </Card>
+      )}
 
       {/* Company info */}
       <Card>
@@ -222,8 +248,8 @@ export function ClientProfileForm({
         </CardContent>
       </Card>
 
-      {/* Change Password */}
-      <Card>
+      {/* Change Password — hidden when masquerading */}
+      {!isMasquerade && <Card>
         <CardHeader>
           <CardTitle className="text-base">Change Password</CardTitle>
         </CardHeader>
@@ -270,7 +296,7 @@ export function ClientProfileForm({
             </Button>
           </form>
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   )
 }

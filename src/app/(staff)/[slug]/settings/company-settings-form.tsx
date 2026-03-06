@@ -27,6 +27,7 @@ interface Props {
     state: string | null
     postalCode: string | null
     country: string | null
+    websiteUrl: string | null
   }
 }
 
@@ -42,6 +43,7 @@ export function CompanySettingsForm({ orgId, orgSlug, initialValues }: Props) {
   const [state, setState] = useState(initialValues.state ?? "")
   const [postalCode, setPostalCode] = useState(initialValues.postalCode ?? "")
   const [country, setCountry] = useState(initialValues.country ?? "US")
+  const [websiteUrl, setWebsiteUrl] = useState(initialValues.websiteUrl ?? "")
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -58,6 +60,7 @@ export function CompanySettingsForm({ orgId, orgSlug, initialValues }: Props) {
           state: state || undefined,
           postalCode: postalCode.trim() || undefined,
           country: country.trim() || undefined,
+          websiteUrl: websiteUrl.trim() || undefined,
         },
         orgSlug
       )
@@ -150,6 +153,16 @@ export function CompanySettingsForm({ orgId, orgSlug, initialValues }: Props) {
             id="country"
             value={country}
             onChange={(e) => { setCountry(e.target.value); setSaved(false) }}
+          />
+        </div>
+        <div className="space-y-1 col-span-2">
+          <Label htmlFor="websiteUrl">Website URL</Label>
+          <Input
+            id="websiteUrl"
+            type="url"
+            placeholder="https://example.com"
+            value={websiteUrl}
+            onChange={(e) => { setWebsiteUrl(e.target.value); setSaved(false) }}
           />
         </div>
       </div>

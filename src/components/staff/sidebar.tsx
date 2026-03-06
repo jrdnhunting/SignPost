@@ -13,6 +13,8 @@ import {
   LogOut,
   CheckSquare,
   ShieldAlert,
+  Map,
+  QrCode,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -36,6 +38,8 @@ export default function Sidebar({ orgSlug, userName, userEmail, isSuperAdmin }: 
   const navLinks: NavLink[] = [
     { href: `/${orgSlug}/dashboard`, label: "Dashboard", icon: LayoutDashboard },
     { href: `/${orgSlug}/orders`, label: "Orders", icon: ClipboardList },
+    { href: `/${orgSlug}/map`, label: "Map", icon: Map },
+    { href: `/${orgSlug}/qrcodes`, label: "QR Codes", icon: QrCode },
     { href: `/${orgSlug}/tasks`, label: "Tasks", icon: CheckSquare },
     { href: `/${orgSlug}/clients`, label: "Clients", icon: Users },
     { href: `/${orgSlug}/inventory`, label: "Inventory", icon: Package },

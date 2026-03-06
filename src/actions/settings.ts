@@ -30,6 +30,7 @@ export async function updateOrgSettings(
     outOfServiceAreaMessage?: string
     removalFormText?: string
     removalFormUrl?: string
+    websiteUrl?: string
   },
   slug: string
 ) {

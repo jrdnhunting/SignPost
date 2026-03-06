@@ -51,8 +51,8 @@ export default auth(function middleware(req: NextAuthRequest) {
     const userType = (session?.user as { type?: string } | undefined)?.type
     const isSuperAdmin = (session?.user as { isSuperAdmin?: boolean } | undefined)?.isSuperAdmin
 
-    // Super admin with masquerade cookie bypasses normal client auth
-    if (userType === "staff" && isSuperAdmin) {
+    // Any staff member with a matching masquerade cookie can access the portal
+    if (userType === "staff") {
       const masqCookie = req.cookies.get("signpost-masquerade")?.value
       if (masqCookie) {
         try {
@@ -75,7 +75,7 @@ export default auth(function middleware(req: NextAuthRequest) {
   }
 
   // Staff org routes — first segment is an org slug
-  const topLevelRoutes = ["api", "login", "portal", "technician", "superadmin", "signup", "_next", "favicon.ico"]
+  const topLevelRoutes = ["api", "login", "portal", "technician", "superadmin", "signup", "qr", "_next", "favicon.ico"]
   const firstSegment = pathname.split("/")[1]
   if (firstSegment && !topLevelRoutes.includes(firstSegment)) {
     const userType = (session?.user as { type?: string } | undefined)?.type

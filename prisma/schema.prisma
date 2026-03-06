@@ -115,6 +115,13 @@ enum AssetCategory {
   YARD_SIGN
 }
 
+enum CatalogItemType {
+  MAIN_SERVICE
+  ADD_ON
+  PRODUCT
+  FEE
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // ORGANIZATION  —  tenant root
 // ═══════════════════════════════════════════════════════════════════════════
@@ -154,6 +161,7 @@ model Organization {
   // Anonymous removal form configuration
   removalFormText     String?
   removalFormUrl      String?
+  websiteUrl          String?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -164,6 +172,9 @@ model Organization {
   invoices           Invoice[]
   serviceAreas       ServiceArea[]
   clientAssets       ClientAsset[]
+  catalogItems       CatalogItem[]
+  emailTemplates     EmailTemplate[]
+  qrCodes            QRCode[]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -252,6 +263,7 @@ model Client {
   invoices        Invoice[]
   paymentMethods  ClientPaymentMethod[]
   clientAssets    ClientAsset[]
+  qrCodes         QRCode[]
 
   @@index([organizationId])
   @@index([organizationId, lastName, firstName])
@@ -353,6 +365,12 @@ model WorkOrder {
   archivedAt    DateTime?
   /// Internal-only notes from dispatcher (not visible on client portal).
   internalNotes String?
+  /// Geocoded latitude — set asynchronously after order creation.
+  lat           Float?
+  /// Geocoded longitude — set asynchronously after order creation.
+  lng           Float?
+  /// Set when status transitions to INSTALLED.
+  installedAt   DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -375,6 +393,7 @@ model WorkOrder {
   invoices              Invoice[]
   tasks                 Task[]
   clientAssets          ClientAsset[]
+  emailLogs             EmailLog[]
 
   // ── Indexes ──────────────────────────────────────────────────────────────
   // These indexes support filtering and sorting within a tenant.
@@ -775,4 +794,83 @@ model ClientAsset {
   @@index([clientId])
   @@index([locationWorkOrderId])
   @@index([locationUserId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CATALOG ITEM  —  products & services catalog
+// ═══════════════════════════════════════════════════════════════════════════
+
+model CatalogItem {
+  id             String          @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  price          Decimal?        @db.Decimal(10, 2)
+  serviceType    CatalogItemType @default(MAIN_SERVICE)
+  isActive       Boolean         @default(true)
+  sortOrder      Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EMAIL TEMPLATE  —  days-in-ground automation
+// ═══════════════════════════════════════════════════════════════════════════
+
+model EmailTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  subject        String
+  body           String
+  triggerDays    Int      @default(30)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  emailLogs    EmailLog[]
+
+  @@index([organizationId])
+}
+
+model EmailLog {
+  id              String   @id @default(cuid())
+  emailTemplateId String
+  workOrderId     String
+  recipientEmail  String
+  status          String   @default("PENDING")
+  createdAt       DateTime @default(now())
+
+  emailTemplate EmailTemplate @relation(fields: [emailTemplateId], references: [id], onDelete: Cascade)
+  workOrder     WorkOrder     @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@unique([emailTemplateId, workOrderId])
+  @@index([workOrderId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// QR CODE  —  named redirect codes
+// ═══════════════════════════════════════════════════════════════════════════
+
+model QRCode {
+  id             String   @id @default(cuid())
+  organizationId String
+  /// Null = global code; set = scoped to this client
+  clientId       String?
+  name           String
+  code           String   @unique
+  targetUrl      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([clientId])
 }
